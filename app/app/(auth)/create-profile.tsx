@@ -51,12 +51,6 @@ export default function CreateProfileScreen() {
   const { colors, spacing } = useTheme()
   const { user, profile, refreshProfile, loading: authLoading } = useAuth()
 
-  if (!authLoading && !user) {
-    return <Redirect href="/(auth)/welcome" />
-  }
-  if (user && profile) {
-    return profile.photo ? <Redirect href="/(app)/home" /> : <Redirect href="/(auth)/add-avatar" />
-  }
   const [username, setUsername] = useState('')
   const [gender, setGender] = useState<Gender>('M')
   const [birthYear, setBirthYear] = useState<number | null>(null)
@@ -95,6 +89,19 @@ export default function CreateProfileScreen() {
     ? Math.floor((Date.now() - new Date(birthDateIso).getTime()) / (365.25 * 24 * 60 * 60 * 1000))
     : 0
   const isAdult = !!birthDateIso && age >= 18
+
+  const citySuggestions = useMemo(() => {
+    const q = city.trim().toLowerCase()
+    if (!q) return []
+    return KNOWN_CITIES_RDC.filter((c) => c.toLowerCase().includes(q)).slice(0, 8)
+  }, [city])
+
+  const daysInMonth = useMemo(() => {
+    if (!birthYear || !birthMonth) return 31
+    return new Date(birthYear, birthMonth, 0).getDate()
+  }, [birthYear, birthMonth])
+
+  const dayOptions = useMemo(() => Array.from({ length: daysInMonth }, (_, i) => i + 1), [daysInMonth])
 
   const handleSubmit = async () => {
     setErrorText('')
@@ -185,21 +192,15 @@ export default function CreateProfileScreen() {
     }
   }
 
-  const citySuggestions = useMemo(() => {
-    const q = city.trim().toLowerCase()
-    if (!q) return []
-    return KNOWN_CITIES_RDC.filter((c) => c.toLowerCase().includes(q)).slice(0, 8)
-  }, [city])
-
   const monthLabel = (m: number) =>
     ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc'][m - 1] ?? String(m)
 
-  const daysInMonth = useMemo(() => {
-    if (!birthYear || !birthMonth) return 31
-    return new Date(birthYear, birthMonth, 0).getDate()
-  }, [birthYear, birthMonth])
-
-  const dayOptions = useMemo(() => Array.from({ length: daysInMonth }, (_, i) => i + 1), [daysInMonth])
+  if (!authLoading && !user) {
+    return <Redirect href="/(auth)/welcome" />
+  }
+  if (user && profile) {
+    return profile.photo ? <Redirect href="/(app)/home" /> : <Redirect href="/(auth)/add-avatar" />
+  }
 
   return (
     <ScrollView
