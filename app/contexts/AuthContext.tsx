@@ -20,8 +20,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profileAccess, setProfileAccess] = useState<ProfileAccess | null>(null)
   const [loading, setLoading] = useState(true)
 
-  /** Évite courses entre refreshProfile et onAuthStateChange (même utilisateur). */
+  /** Évite courses entre refreshProfile ; réinitialisé au logout. */
   const profileChainRef = useRef(Promise.resolve())
+  /** Utilisateur attendu après le dernier événement auth — ignore les fetchs obsolètes (ex. après déconnexion). */
+  const expectedUserIdRef = useRef<string | null>(null)
 
   const loadProfilesForUser = useCallback(async (userId: string) => {
     const run = async () => {
@@ -32,6 +34,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         )
         .eq('id', userId)
         .maybeSingle()
+      if (expectedUserIdRef.current !== userId) return
       if (profErr) {
         console.warn('[Auth] profiles:', profErr.message)
         setProfile(null)
@@ -46,6 +49,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         )
         .eq('user_id', userId)
         .maybeSingle()
+      if (expectedUserIdRef.current !== userId) return
       if (accErr) {
         console.warn('[Auth] profile_access:', accErr.message)
         setProfileAccess(null)
@@ -67,25 +71,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let mounted = true
-    // Un seul flux d’init : onAuthStateChange émet INITIAL_SESSION après le lock interne.
-    // Ne pas appeler getSession() en parallèle : ça provoque des courses sur lock:decouverte-auth (web).
+    // Ne pas await supabase.from / loadProfilesForUser dans ce callback : GoTrue await le callback
+    // pendant que le lock auth est tenu → signOut() reste bloqué et peut timeouter (ex. 6000ms côté lock).
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!mounted) return
+
+      const uid = session?.user?.id ?? null
+      expectedUserIdRef.current = uid
       setUser(session?.user ?? null)
-      try {
-        if (session?.user?.id) {
-          await loadProfilesForUser(session.user.id)
-        } else {
-          setProfile(null)
-          setProfileAccess(null)
-        }
-      } catch (e) {
-        console.warn('[Auth] load profiles after session change', e)
-      } finally {
-        if (mounted) setLoading(false)
+
+      if (!uid) {
+        setProfile(null)
+        setProfileAccess(null)
+        setLoading(false)
+        return
       }
+
+      void (async () => {
+        try {
+          await loadProfilesForUser(uid)
+        } catch (e) {
+          console.warn('[Auth] load profiles after session change', e)
+        } finally {
+          if (mounted && expectedUserIdRef.current === uid) setLoading(false)
+        }
+      })()
     })
     return () => {
       mounted = false
@@ -94,10 +106,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [loadProfilesForUser])
 
   const signOut = async () => {
-    await supabase.auth.signOut()
+    expectedUserIdRef.current = null
+    profileChainRef.current = Promise.resolve()
+    try {
+      // 'local' : nettoie le storage sans attendre l’API revoke (évite blocages réseau / lock prolongé).
+      const { error } = await supabase.auth.signOut({ scope: 'local' })
+      if (error) console.warn('[Auth] signOut:', error.message)
+    } catch (e) {
+      console.warn('[Auth] signOut', e)
+    }
     setUser(null)
     setProfile(null)
     setProfileAccess(null)
+    setLoading(false)
   }
 
   return (

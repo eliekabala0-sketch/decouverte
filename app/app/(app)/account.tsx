@@ -1,4 +1,5 @@
-import { View, Text, Pressable, StyleSheet, ScrollView } from 'react-native'
+import { useState } from 'react'
+import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator } from 'react-native'
 import { useRouter } from 'expo-router'
 import { useTheme } from '@/theme/ThemeContext'
 import { useAuth } from '@/contexts/AuthContext'
@@ -9,6 +10,18 @@ export default function AccountScreen() {
   const router = useRouter()
   const { colors } = useTheme()
   const { profile, profileAccess, signOut } = useAuth()
+  const [signingOut, setSigningOut] = useState(false)
+
+  const handleSignOut = async () => {
+    if (signingOut) return
+    setSigningOut(true)
+    try {
+      await signOut()
+      router.replace('/(auth)/welcome')
+    } finally {
+      setSigningOut(false)
+    }
+  }
 
   const requiresPayment = profile && GENDER_REQUIRES_PROFILES_ACCESS_PAYMENT.includes(profile.gender)
   const hasProfilesAccess = profile ? canViewFullProfiles(profile.gender, profileAccess) : false
@@ -55,10 +68,15 @@ export default function AccountScreen() {
         <Text style={[styles.menuText, { color: colors.text }]}>Paiements & Packs</Text>
       </Pressable>
       <Pressable
-        onPress={() => signOut()}
+        onPress={handleSignOut}
+        disabled={signingOut}
         style={[styles.menuItem, { backgroundColor: colors.surface, borderColor: colors.error }]}
       >
-        <Text style={[styles.menuText, { color: colors.error }]}>Déconnexion</Text>
+        {signingOut ? (
+          <ActivityIndicator color={colors.error} />
+        ) : (
+          <Text style={[styles.menuText, { color: colors.error }]}>Déconnexion</Text>
+        )}
       </Pressable>
     </ScrollView>
   )
