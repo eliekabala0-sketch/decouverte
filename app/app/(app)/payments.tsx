@@ -21,16 +21,16 @@ export default function PaymentsScreen() {
     if (!user?.id || !profile) return
     try {
       const until = new Date(Date.now() + PROFILES_ACCESS_DAYS * 24 * 60 * 60 * 1000).toISOString()
-      await supabase.from('payments').insert({
+      const { error: payErr } = await supabase.from('payments').insert({
         user_id: user.id,
         type: 'profiles_access',
         provider: PAYMENT_PROVIDER_BADIBOSS,
         amount_cents: 0,
         currency: 'USD',
         status: 'completed',
-        reference: null,
         metadata: { days: PROFILES_ACCESS_DAYS, until },
       })
+      if (payErr) throw new Error(payErr.message || payErr.code || 'Échec enregistrement paiement')
 
       const currentQuota = profileAccess?.contact_quota ?? 0
       const currentUsed = profileAccess?.contact_quota_used ?? 0
@@ -44,11 +44,12 @@ export default function PaymentsScreen() {
           photo_quota: pq + 100,
           photo_quota_used: pu,
           all_profiles_access: true,
+          profiles_access_until: until,
           updated_at: new Date().toISOString(),
         },
         { onConflict: 'user_id' }
       )
-      if (error) throw error
+      if (error) throw new Error(error.message || error.code || 'Échec mise à jour accès profil')
       await refreshProfile()
       Alert.alert('Accès activé', 'Accès profils/photos activé (simulation paiement).')
     } catch (e: any) {

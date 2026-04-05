@@ -47,6 +47,9 @@ export const supabase = createClient(supabaseUrl || '', supabaseKey || '', {
     // Sur web, le refresh auto + lock peut rester bloqué selon environnements/onglets.
     autoRefreshToken: Platform.OS !== 'web',
     detectSessionInUrl: Platform.OS === 'web',
+    // Réduit les warnings « lock not released / stolen » (support runtime auth-js ; types parfois en retard).
+    // @ts-expect-error lockAcquireTimeout existe sur GoTrueClient
+    lockAcquireTimeout: 20000,
   },
 })
 

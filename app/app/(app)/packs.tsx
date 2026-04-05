@@ -40,16 +40,16 @@ export default function PacksScreen() {
     const addContacts = pack.contact_quota ?? pack.quota
     try {
       setBuyingId(pack.id)
-      await supabase.from('payments').insert({
+      const { error: payErr } = await supabase.from('payments').insert({
         user_id: user.id,
         type: 'contact_pack',
         provider: PAYMENT_PROVIDER_BADIBOSS,
         amount_cents: pack.price_cents,
         currency: pack.currency,
         status: 'completed',
-        reference: null,
         metadata: { pack_id: pack.id, pack_name: pack.name, quota: addContacts },
       })
+      if (payErr) throw new Error(payErr.message || payErr.code || 'Échec enregistrement paiement')
 
       const currentQuota = profileAccess?.contact_quota ?? 0
       const currentUsed = profileAccess?.contact_quota_used ?? 0
@@ -67,7 +67,7 @@ export default function PacksScreen() {
         },
         { onConflict: 'user_id' }
       )
-      if (error) throw error
+      if (error) throw new Error(error.message || error.code || 'Échec mise à jour quotas')
       await refreshProfile()
       Alert.alert('Pack activé', `+${addContacts} contact(s) ajouté(s).`)
     } catch (e: any) {
