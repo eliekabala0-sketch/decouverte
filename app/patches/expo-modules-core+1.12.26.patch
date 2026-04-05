@@ -1,0 +1,16 @@
+diff --git a/node_modules/expo-modules-core/build/createWebModule.web.js b/node_modules/expo-modules-core/build/createWebModule.web.js
+index ba445e9..a3d50ce 100644
+--- a/node_modules/expo-modules-core/build/createWebModule.web.js
++++ b/node_modules/expo-modules-core/build/createWebModule.web.js
+@@ -3,4 +3,10 @@ export function createWebModule(moduleImplementation) {
+     const module = new NativeModule();
+     return Object.assign(module, moduleImplementation);
+ }
++export function registerWebModule(moduleImplementationOrFactory, name) {
++    const impl = typeof moduleImplementationOrFactory === 'function'
++        ? new moduleImplementationOrFactory()
++        : moduleImplementationOrFactory;
++    return createWebModule(impl);
++}
+ //# sourceMappingURL=createWebModule.web.js.map
+\ No newline at end of file

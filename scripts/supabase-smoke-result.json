@@ -1,0 +1,70 @@
+{
+  "url_check": {
+    "check": "url_exact",
+    "expected": "https://lddzhnbrknrdrhsplfzl.supabase.co",
+    "actual": "https://lddzhnbrknrdrhsplfzl.supabase.co",
+    "match": true
+  },
+  "results": [
+    {
+      "label": "GET profiles ?limit=5",
+      "status": 200,
+      "ok": true,
+      "body": []
+    },
+    {
+      "label": "POST profiles test insert (anon)",
+      "status": 400,
+      "ok": false,
+      "body": {
+        "code": "PGRST204",
+        "details": null,
+        "hint": null,
+        "message": "Could not find the 'birthdate' column of 'profiles' in the schema cache"
+      }
+    },
+    {
+      "label": "GET profile_access",
+      "status": 200,
+      "ok": true,
+      "body": []
+    },
+    {
+      "label": "GET contact_packs",
+      "status": 200,
+      "ok": true,
+      "body": []
+    },
+    {
+      "label": "GET openapi",
+      "status": 401,
+      "ok": false,
+      "body": {
+        "message": "Access to schema is forbidden",
+        "hint": "Accessing the schema via the Data API is only allowed using a secret API key."
+      }
+    },
+    {
+      "openapi_profiles_columns": null,
+      "openapi_profile_access_columns": null,
+      "openapi_contact_packs_columns": null
+    },
+    {
+      "label": "PATCH profiles anon",
+      "status": 400,
+      "ok": false,
+      "body": {
+        "code": "PGRST204",
+        "details": null,
+        "hint": null,
+        "message": "Could not find the 'display_name' column of 'profiles' in the schema cache"
+      }
+    },
+    {
+      "label": "GET storage buckets",
+      "status": 200,
+      "ok": true,
+      "body": []
+    }
+  ]
+}

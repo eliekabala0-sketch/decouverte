@@ -1,0 +1,71 @@
+.media-upload {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.media-upload-input {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+.media-upload-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.media-upload-btn {
+  padding: 10px 16px;
+  background: var(--surface);
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 0.95rem;
+  color: var(--text);
+  max-width: 280px;
+}
+.media-upload-btn:hover:not(:disabled) {
+  border-color: var(--primary);
+  background: rgba(var(--primary-rgb, 99, 102, 241), 0.06);
+}
+.media-upload-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.media-upload-hint {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+.media-upload-preview {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+.media-upload-preview-img {
+  max-width: 100%;
+  max-height: 240px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+}
+.media-upload-preview-video {
+  max-width: 100%;
+  max-height: 240px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+}
+.media-upload-remove {
+  padding: 6px 12px;
+  font-size: 0.85rem;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.media-upload-remove:hover:not(:disabled) {
+  color: var(--error, #dc2626);
+  border-color: var(--error, #dc2626);
+}
