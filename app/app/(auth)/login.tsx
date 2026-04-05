@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router'
 import { useTheme } from '@/theme/ThemeContext'
 import { useAuth } from '@/contexts/AuthContext'
 import { supabase } from '@/lib/supabase'
+import { syntheticEmailsForSignIn } from '../../../lib/authSyntheticEmail'
 
 async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   return await Promise.race([
@@ -28,14 +29,7 @@ export default function LoginScreen() {
     }
     setLoading(true)
     try {
-      const digitsOnly = phone.replace(/\D/g, '')
-      const cleaned = phone.replace(/\s/g, '')
-      const candidateEmails = Array.from(
-        new Set([
-          `tel_${digitsOnly}@decouverte.auth`,
-          `${cleaned}@decouverte.auth`,
-        ])
-      )
+      const candidateEmails = syntheticEmailsForSignIn(phone)
       let lastError: any = null
       let loggedIn = false
       for (const email of candidateEmails) {

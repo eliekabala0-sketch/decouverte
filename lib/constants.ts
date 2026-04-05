@@ -53,5 +53,7 @@ export const COMMUNES_KINSHASA = [
 export const DEFAULT_CONTACT_QUOTAS = [1, 3, 5, 10]
 /** Longueur minimale du mot de passe à l'inscription. */
 export const MIN_PASSWORD_LENGTH = 6
+/** Chiffres minimum dans le numéro (hors espaces) : au-delà du seul indicatif +243. */
+export const MIN_PHONE_DIGITS_SIGNUP = 10
 /** Durée en jours de l'accès profils/photos après paiement 1. */
 export const PROFILES_ACCESS_DAYS = 30
