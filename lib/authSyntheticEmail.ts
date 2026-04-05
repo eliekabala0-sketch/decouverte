@@ -1,10 +1,25 @@
 /**
  * Identifiants email factices pour auth mot de passe Supabase (GoTrue valide le format via checkmail).
- * tel_*@decouverte.auth provoque un 400 « Unable to validate email address » en production.
+ * - tel_*@decouverte.auth → 400 « Unable to validate email address »
+ * - tel_*@example.com → peut être refusé par la config hébergée Supabase (email_address_invalid)
+ *
+ * Défaut gmail.com : identifiant technique seulement (pas une vraie boîte). Surcharge possible via
+ * EXPO_PUBLIC_SYNTHETIC_EMAIL_DOMAIN (Expo injecte process.env au build).
  */
 
-/** Domaine accepté par validateEmail côté serveur (RFC / bibliothèque checkmail). */
-export const SYNTHETIC_AUTH_EMAIL_DOMAIN = 'example.com'
+function envSyntheticDomain(): string {
+  try {
+    const env = (globalThis as unknown as { process?: { env?: Record<string, string> } }).process?.env
+    const v = env?.EXPO_PUBLIC_SYNTHETIC_EMAIL_DOMAIN?.trim()
+    if (v && v.includes('.')) return v
+  } catch {
+    /* ignore */
+  }
+  return ''
+}
+
+/** Domaine pour la partie après @ (doit être accepté par ton projet Supabase). */
+export const SYNTHETIC_AUTH_EMAIL_DOMAIN = envSyntheticDomain() || 'gmail.com'
 
 const LEGACY_SYNTHETIC_DOMAIN = 'decouverte.auth'
 
@@ -14,7 +29,7 @@ export function syntheticEmailForSignUp(digitsOnly: string): string {
 }
 
 /**
- * Connexion : essayer le domaine actuel puis l’ancien (comptes déjà créés avec decouverte.auth).
+ * Connexion : domaine actuel, puis anciens (example.com, decouverte.auth).
  */
 export function syntheticEmailsForSignIn(phone: string): string[] {
   const digitsOnly = phone.replace(/\D/g, '')
@@ -22,6 +37,7 @@ export function syntheticEmailsForSignIn(phone: string): string[] {
   return Array.from(
     new Set([
       syntheticEmailForSignUp(digitsOnly),
+      `tel_${digitsOnly}@example.com`,
       `tel_${digitsOnly}@${LEGACY_SYNTHETIC_DOMAIN}`,
       `${cleanedNoSpaces}@${LEGACY_SYNTHETIC_DOMAIN}`,
     ])

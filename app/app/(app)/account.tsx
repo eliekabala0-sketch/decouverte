@@ -10,6 +10,7 @@ export default function AccountScreen() {
   const router = useRouter()
   const { colors } = useTheme()
   const { profile, profileAccess, signOut } = useAuth()
+  const isAdmin = profile?.role === 'admin'
   const [signingOut, setSigningOut] = useState(false)
 
   const handleSignOut = async () => {
@@ -39,6 +40,11 @@ export default function AccountScreen() {
   return (
     <ScrollView style={[styles.container, { backgroundColor: colors.background }]} contentContainerStyle={styles.content}>
       <Text style={[styles.title, { color: colors.text }]}>Mon compte</Text>
+      {isAdmin ? (
+        <View style={[styles.adminBadge, { backgroundColor: colors.surface, borderColor: colors.accent }]}>
+          <Text style={[styles.adminBadgeText, { color: colors.accent }]}>Compte administrateur</Text>
+        </View>
+      ) : null}
       {profile && (
         <View style={[styles.card, { backgroundColor: colors.surface }]}>
           <Text style={[styles.name, { color: colors.text }]}>{profile.username}</Text>
@@ -86,6 +92,15 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   content: { padding: 24, paddingTop: 56, paddingBottom: 40 },
   title: { fontSize: 26, fontWeight: '700', marginBottom: 24 },
+  adminBadge: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 16,
+    alignSelf: 'flex-start',
+  },
+  adminBadgeText: { fontSize: 14, fontWeight: '700' },
   card: { padding: 20, borderRadius: 16, marginBottom: 20 },
   name: { fontSize: 20, fontWeight: '600' },
   meta: { fontSize: 15, marginTop: 4 },
