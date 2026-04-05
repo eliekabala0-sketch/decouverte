@@ -42,8 +42,6 @@ export interface ProfileAccess {
   contact_quota: number
   contact_quota_used: number
   updated_at?: string | null
-  /** Fin d’accès profils (schéma historique + synchro serveur). */
-  profiles_access_until?: string | null
   photo_quota?: number | null
   photo_quota_used?: number | null
   all_profiles_access?: boolean | null

@@ -44,7 +44,6 @@ export default function PaymentsScreen() {
           photo_quota: pq + 100,
           photo_quota_used: pu,
           all_profiles_access: true,
-          profiles_access_until: until,
           updated_at: new Date().toISOString(),
         },
         { onConflict: 'user_id' }

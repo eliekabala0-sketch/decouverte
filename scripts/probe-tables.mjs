@@ -24,7 +24,6 @@ async function probe(table, cols) {
 
 await probe('profile_access', [
   'user_id',
-  'profiles_access_until',
   'contact_quota',
   'contact_quota_used',
   'updated_at',
