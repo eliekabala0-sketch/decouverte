@@ -18,7 +18,10 @@ export function canViewFullProfiles(
   viewerGender: Gender | string | undefined,
   profileAccess: ProfileAccess | null
 ): boolean {
-  if (viewerGender === 'F') return true
+  if (viewerGender === 'F') {
+    // Confidentialité renforcée: les femmes ne voient pas automatiquement les photos.
+    // L'accès passe aussi par les droits pack/quotas.
+  }
   if (!profileAccess) return false
   if (profileAccess.all_profiles_access) return true
 

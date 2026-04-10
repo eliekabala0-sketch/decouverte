@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator } from 'react-native'
+import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator, Linking } from 'react-native'
 import { useRouter } from 'expo-router'
 import { useTheme } from '@/theme/ThemeContext'
 import { useAuth } from '@/contexts/AuthContext'
@@ -36,6 +36,7 @@ export default function AccountScreen() {
   const contactQuota = profileAccess
     ? remainingContacts(profileAccess)
     : 0
+  const adminDashboardUrl = process.env.EXPO_PUBLIC_ADMIN_DASHBOARD_URL || ''
 
   return (
     <ScrollView style={[styles.container, { backgroundColor: colors.background }]} contentContainerStyle={styles.content}>
@@ -44,6 +45,14 @@ export default function AccountScreen() {
         <View style={[styles.adminBadge, { backgroundColor: colors.surface, borderColor: colors.accent }]}>
           <Text style={[styles.adminBadgeText, { color: colors.accent }]}>Compte administrateur</Text>
         </View>
+      ) : null}
+      {isAdmin && adminDashboardUrl ? (
+        <Pressable
+          onPress={() => Linking.openURL(adminDashboardUrl)}
+          style={[styles.menuItem, { backgroundColor: colors.surface, borderColor: colors.accent }]}
+        >
+          <Text style={[styles.menuText, { color: colors.accent }]}>Ouvrir le tableau de bord admin</Text>
+        </Pressable>
       ) : null}
       {profile && (
         <View style={[styles.card, { backgroundColor: colors.surface }]}>
@@ -59,6 +68,11 @@ export default function AccountScreen() {
               Contacts restants : {contactQuota}
             </Text>
           )}
+          {profile.gender === 'F' ? (
+            <Text style={[styles.quotaLabel, { color: colors.textMuted }]}>
+              Boost visibilité : {profile.boost_reason ? 'actif' : 'inactif'}
+            </Text>
+          ) : null}
         </View>
       )}
       <Pressable

@@ -18,6 +18,7 @@ export default function ProfilesScreen() {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [reciprocalEnabled, setReciprocalEnabled] = useState(false)
 
   const modeLabel = mode === 'serieux' ? MODES.serieux.label : MODES.libre.label
 
@@ -25,6 +26,14 @@ export default function ProfilesScreen() {
     setLoadError(null)
     const load = async () => {
       try {
+        const { data: setting } = await supabase
+          .from('admin_settings')
+          .select('value')
+          .eq('key', 'reciprocal_matching_enabled')
+          .maybeSingle()
+        const reciprocal = Boolean((setting as { value?: boolean } | null)?.value)
+        setReciprocalEnabled(reciprocal)
+
         const { data, error } = await supabase
           .from('profiles')
           .select(
@@ -34,7 +43,32 @@ export default function ProfilesScreen() {
           .order('created_at', { ascending: false })
         if (error) throw error
         const list = (data ?? []) as Profile[]
-        setProfiles(list.filter((p) => p.id !== myProfile?.id))
+        const filteredSelf = list
+          .filter((p) => p.id !== myProfile?.id)
+          .filter((p) => {
+            const libre = p.mode_libre_active ?? true
+            const serieux = p.mode_serieux_active ?? true
+            return mode === 'serieux' ? serieux : libre
+          })
+        if (!myProfile?.gender) {
+          setProfiles(filteredSelf)
+          return
+        }
+        if (myProfile.gender === 'M') {
+          // Mode standard: les hommes voient les profils femmes.
+          setProfiles(filteredSelf.filter((p) => p.gender === 'F'))
+          return
+        }
+        if (myProfile.gender === 'F' && !reciprocal) {
+          // Non réciproque par défaut.
+          setProfiles([])
+          return
+        }
+        if (myProfile.gender === 'F' && reciprocal) {
+          setProfiles(filteredSelf.filter((p) => p.gender === 'M'))
+          return
+        }
+        setProfiles(filteredSelf)
       } catch (e: unknown) {
         setLoadError(e instanceof Error ? e.message : 'Erreur de chargement')
       } finally {
@@ -42,7 +76,7 @@ export default function ProfilesScreen() {
       }
     }
     load()
-  }, [myProfile?.id, refreshKey])
+  }, [myProfile?.id, myProfile?.gender, refreshKey])
 
   const canViewFull = canViewFullProfiles(myProfile?.gender, profileAccess)
   const onPressProfile = (id: string) => router.push(`/(app)/profile/${id}`)
@@ -72,6 +106,11 @@ export default function ProfilesScreen() {
       <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
         {profiles.length} profil{profiles.length !== 1 ? 's' : ''}
       </Text>
+      {myProfile?.gender === 'F' && !reciprocalEnabled ? (
+        <Text style={[styles.subtitle, { color: colors.textMuted }]}>
+          La recherche réciproque est désactivée pour le moment.
+        </Text>
+      ) : null}
       <FlatList
         data={profiles}
         keyExtractor={(item) => item.id}
@@ -80,7 +119,17 @@ export default function ProfilesScreen() {
         contentContainerStyle={styles.listContent}
         renderItem={({ item }) => (
           <Pressable onPress={() => onPressProfile(item.id)} style={styles.cardWrap}>
-            <ProfileCard profile={item} canViewFull={canViewFull} />
+            <ProfileCard
+              profile={item}
+              canViewFull={
+                canViewFull &&
+                !(
+                  myProfile?.gender === 'F' &&
+                  item.gender === 'M' &&
+                  !reciprocalEnabled
+                )
+              }
+            />
           </Pressable>
         )}
         ListEmptyComponent={

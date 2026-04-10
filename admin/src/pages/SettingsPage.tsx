@@ -7,6 +7,7 @@ type Setting = { id: string; key: string; value: boolean | number | string }
 const LABELS: Record<string, string> = {
   mode_libre_enabled: 'Mode Libre',
   mode_serieux_enabled: 'Mode Sérieux',
+  reciprocal_matching_enabled: 'Recherche réciproque (femmes voient aussi les hommes)',
   public_publications_enabled: 'Publications publiques',
   ad_campaigns_enabled: 'Campagnes publicitaires',
   mass_messages_enabled: 'Messages de masse',

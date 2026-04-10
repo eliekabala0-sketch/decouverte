@@ -16,6 +16,7 @@ import { GENDER_LABELS } from '../../../../lib/constants'
 import { canUnlockContact, canViewFullProfiles, remainingContacts } from '../../../../lib/access'
 import { supabase } from '@/lib/supabase'
 import type { Profile } from '../../../../lib/types'
+import { listProfilePhotos, type ProfilePhotoRow } from '@/lib/profilePhotos'
 
 export default function ProfileDetailScreen() {
   const router = useRouter()
@@ -24,15 +25,22 @@ export default function ProfileDetailScreen() {
   const params = useLocalSearchParams<{ id?: string }>()
   const [profile, setProfile] = useState<Profile | null>(null)
   const [loading, setLoading] = useState(!!params.id)
-  const [unlocking, setUnlocking] = useState(false)
   const [openingChat, setOpeningChat] = useState(false)
   const [reporting, setReporting] = useState(false)
+  const [photos, setPhotos] = useState<ProfilePhotoRow[]>([])
+  const [reciprocalEnabled, setReciprocalEnabled] = useState(false)
 
   const canViewFull = canViewFullProfiles(myProfile?.gender, profileAccess)
 
   useEffect(() => {
     if (!params.id) return
     const load = async () => {
+      const { data: setting } = await supabase
+        .from('admin_settings')
+        .select('value')
+        .eq('key', 'reciprocal_matching_enabled')
+        .maybeSingle()
+      setReciprocalEnabled(Boolean((setting as { value?: boolean } | null)?.value))
       const { data } = await supabase
         .from('profiles')
         .select(
@@ -41,6 +49,14 @@ export default function ProfileDetailScreen() {
         .eq('id', params.id)
         .single()
       setProfile(data as Profile | null)
+      if (params.id) {
+        try {
+          const rows = await listProfilePhotos(params.id)
+          setPhotos(rows)
+        } catch {
+          setPhotos([])
+        }
+      }
       setLoading(false)
     }
     load()
@@ -78,6 +94,13 @@ export default function ProfileDetailScreen() {
   }
 
   const contactsLeft = remainingContacts(profileAccess)
+  const canViewTargetFull =
+    canViewFull &&
+    !(
+      myProfile?.gender === 'F' &&
+      profile.gender === 'M' &&
+      !reciprocalEnabled
+    )
 
   const openConversation = async () => {
     if (!user?.id || !profile) return
@@ -162,38 +185,12 @@ export default function ProfileDetailScreen() {
     )
   }
 
-  const unlockContact = async () => {
-    if (!user?.id) return
-    if (!canUnlockContact(profileAccess)) {
-      router.push('/(app)/packs')
-      return
-    }
-    try {
-      setUnlocking(true)
-      const currentUsed = profileAccess?.contact_quota_used ?? 0
-      const { error } = await supabase
-        .from('profile_access')
-        .update({
-          contact_quota_used: currentUsed + 1,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('user_id', user.id)
-      if (error) throw error
-      await refreshProfile()
-      Alert.alert('Contact débloqué', '1 contact a été consommé.')
-    } catch (e: any) {
-      Alert.alert('Contacts', e?.message ?? 'Impossible de débloquer le contact.')
-    } finally {
-      setUnlocking(false)
-    }
-  }
-
   return (
     <ScrollView style={[styles.container, { backgroundColor: colors.background }]} contentContainerStyle={styles.content}>
       <Pressable onPress={() => router.back()} style={styles.back}>
         <Text style={{ color: colors.primary, fontWeight: '600' }}>Retour</Text>
       </Pressable>
-      {canViewFull && profile ? (
+      {canViewTargetFull && profile ? (
         <Pressable
           onPress={reportProfile}
           disabled={reporting}
@@ -204,7 +201,7 @@ export default function ProfileDetailScreen() {
           </Text>
         </Pressable>
       ) : null}
-      {canViewFull ? (
+      {canViewTargetFull ? (
         <>
           {profile.photo ? (
             <Image source={{ uri: profile.photo }} style={styles.heroPhoto} resizeMode="cover" />
@@ -215,6 +212,16 @@ export default function ProfileDetailScreen() {
           </Text>
           {profile.bio ? (
             <Text style={[styles.bio, { color: colors.text }]}>{profile.bio}</Text>
+          ) : null}
+          {photos.length > 0 ? (
+            <View style={[styles.section, { backgroundColor: colors.surface }]}>
+              <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Galerie</Text>
+              <View style={styles.gallery}>
+                {photos.map((p) => (
+                  <Image key={p.id} source={{ uri: p.photo_url }} style={styles.galleryPhoto} resizeMode="cover" />
+                ))}
+              </View>
+            </View>
           ) : null}
           <View style={[styles.section, { backgroundColor: colors.surface }]}>
             <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Contact</Text>
@@ -227,19 +234,7 @@ export default function ProfileDetailScreen() {
               style={[styles.ctaBtn, { backgroundColor: colors.primary, marginTop: 12 }]}
             >
               <Text style={styles.ctaBtnText}>
-                {openingChat ? 'Ouverture...' : 'Envoyer un message'}
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={unlockContact}
-              disabled={unlocking}
-              style={[
-                styles.ctaBtn,
-                { backgroundColor: contactsLeft > 0 ? colors.accent : colors.primary, marginTop: 8 },
-              ]}
-            >
-              <Text style={styles.ctaBtnText}>
-                {contactsLeft > 0 ? (unlocking ? 'Déblocage...' : 'Débloquer le contact') : 'Acheter un pack'}
+                {openingChat ? 'Ouverture...' : 'Débloquer et envoyer un message'}
               </Text>
             </Pressable>
           </View>
@@ -307,4 +302,6 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   reportBtnText: { fontSize: 14 },
+  gallery: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  galleryPhoto: { width: 90, height: 90, borderRadius: 8 },
 })

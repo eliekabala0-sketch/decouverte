@@ -16,6 +16,7 @@ export default function PaymentsScreen() {
     : false
   const hasProfilesAccess = profile ? canViewFullProfiles(profile.gender, profileAccess) : false
   const contactsLeft = remainingContacts(profileAccess)
+  const canBuyBoost = profile?.gender === 'F'
 
   const buyProfilesAccess = async () => {
     if (!user?.id || !profile) return
@@ -53,6 +54,25 @@ export default function PaymentsScreen() {
       Alert.alert('Accès activé', 'Accès profils/photos activé (simulation paiement).')
     } catch (e: any) {
       Alert.alert('Paiement', e?.message ?? "Impossible d'activer l'accès.")
+    }
+  }
+
+  const buyVisibilityBoost = async () => {
+    if (!user?.id || !profile) return
+    try {
+      await supabase.from('payments').insert({
+        user_id: user.id,
+        provider: PAYMENT_PROVIDER_BADIBOSS,
+        amount: 0,
+        currency: 'USD',
+        status: 'completed',
+      })
+      const { error } = await supabase.from('profiles').update({ boost_reason: 'paid' }).eq('id', user.id)
+      if (error) throw error
+      await refreshProfile()
+      Alert.alert('Boost activé', 'Votre profil est mis en avant.')
+    } catch (e: any) {
+      Alert.alert('Boost', e?.message ?? 'Impossible d’activer le boost.')
     }
   }
 
@@ -97,6 +117,20 @@ export default function PaymentsScreen() {
           <Text style={styles.btnText}>Voir les packs</Text>
         </Pressable>
       </View>
+      {canBuyBoost ? (
+        <View style={[styles.card, { backgroundColor: c.surface }]}>
+          <Text style={[styles.cardTitle, { color: c.text }]}>Boost visibilité</Text>
+          <Text style={[styles.cardDesc, { color: c.textSecondary }]}>
+            Mettez votre profil en avant auprès des utilisateurs.
+          </Text>
+          <Text style={[styles.status, { color: profile?.boost_reason ? c.success : c.textMuted }]}>
+            {profile?.boost_reason ? 'Boost actif' : 'Boost inactif'}
+          </Text>
+          <Pressable onPress={buyVisibilityBoost} style={[styles.btn, { backgroundColor: c.primary }]}>
+            <Text style={styles.btnText}>{profile?.boost_reason ? 'Réactiver le boost' : 'Activer le boost'}</Text>
+          </Pressable>
+        </View>
+      ) : null}
     </ScrollView>
   )
 }
