@@ -37,47 +37,29 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   })
 }
 
+/**
+ * Lien stable avec Auth : public.profiles.id = auth.users.id (création profil app).
+ * Ne pas utiliser profiles.user_id : colonne absente sur plusieurs déploiements réels.
+ */
 async function fetchProfileIsAdmin(userId: string): Promise<{ ok: boolean; error: Error | null }> {
   if (!userId) {
     return { ok: false, error: null }
   }
-  const byId = await withTimeout(
-    Promise.resolve(supabase.from('profiles').select('role,id,user_id').eq('id', userId).maybeSingle()),
+  const res = await withTimeout(
+    Promise.resolve(supabase.from('profiles').select('role').eq('id', userId).maybeSingle()),
     PROFILE_ROLE_TIMEOUT_MS,
-    'Lecture du rôle (profiles par id)'
+    'Lecture du rôle (profiles.id = auth.uid)'
   )
-  if (byId.error) {
-    console.error('[admin-auth] profiles.select(role) id=', userId, byId.error)
-    return { ok: false, error: byId.error instanceof Error ? byId.error : new Error(String(byId.error)) }
+  if (res.error) {
+    console.error('[admin-auth] profiles.select(role)', { authUserId: userId, error: res.error })
+    return { ok: false, error: res.error instanceof Error ? res.error : new Error(String(res.error)) }
   }
-  let row = byId.data as { role?: unknown; id?: string; user_id?: string } | null
-  let match: 'id' | 'user_id' | null = row ? 'id' : null
-
-  if (!row) {
-    const byUserId = await withTimeout(
-      Promise.resolve(supabase.from('profiles').select('role,id,user_id').eq('user_id', userId).maybeSingle()),
-      PROFILE_ROLE_TIMEOUT_MS,
-      'Lecture du rôle (profiles par user_id)'
-    )
-    if (byUserId.error) {
-      const msg = String((byUserId.error as { message?: string }).message || '').toLowerCase()
-      if (msg.includes('user_id') && (msg.includes('does not exist') || msg.includes('schema cache'))) {
-        console.info('[admin-auth] colonne profiles.user_id absente, seul id=auth.uid() est utilisé')
-      } else {
-        console.error('[admin-auth] profiles.select(role) user_id=', userId, byUserId.error)
-        return {
-          ok: false,
-          error: byUserId.error instanceof Error ? byUserId.error : new Error(String(byUserId.error)),
-        }
-      }
-    } else {
-      row = byUserId.data as { role?: unknown } | null
-      match = row ? 'user_id' : null
-    }
-  }
-
-  const ok = roleIsAdmin(row?.role)
-  console.info('[admin-auth] rôle admin', { authUserId: userId, match, role: row?.role ?? null, ok })
+  const ok = roleIsAdmin((res.data as { role?: unknown } | null)?.role)
+  console.info('[admin-auth] rôle admin', {
+    authUserId: userId,
+    role: (res.data as { role?: unknown } | null)?.role ?? null,
+    ok,
+  })
   return { ok, error: null }
 }
 

@@ -6,6 +6,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { GENDER_LABELS, GENDER_REQUIRES_PROFILES_ACCESS_PAYMENT } from '../../../lib/constants'
 import { canViewFullProfiles, remainingContacts } from '../../../lib/access'
 import { roleIsAdmin } from '../../../lib/profileRole'
+import { formatBoostStatusLabel } from '../../../lib/boostVisibility'
 
 export default function AccountScreen() {
   const router = useRouter()
@@ -69,11 +70,9 @@ export default function AccountScreen() {
               Contacts restants : {contactQuota}
             </Text>
           )}
-          {profile.gender === 'F' ? (
-            <Text style={[styles.quotaLabel, { color: colors.textMuted }]}>
-              Boost visibilité : {profile.boost_reason ? 'actif' : 'inactif'}
-            </Text>
-          ) : null}
+          <Text style={[styles.quotaLabel, { color: colors.textMuted }]}>
+            Mise en avant : {formatBoostStatusLabel(profile)}
+          </Text>
         </View>
       )}
       <Pressable

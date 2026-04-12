@@ -57,3 +57,10 @@ export const MIN_PASSWORD_LENGTH = 6
 export const MIN_PHONE_DIGITS_SIGNUP = 10
 /** Durée en jours de l'accès profils/photos après paiement 1. */
 export const PROFILES_ACCESS_DAYS = 30
+
+/** Offres mise en avant (boost) : durée + prix TTC en centimes USD (paiement Badiboss). */
+export const VISIBILITY_BOOST_TIERS = [
+  { days: 7, label: '7 jours', amount_cents: 9_99 },
+  { days: 14, label: '14 jours', amount_cents: 17_99 },
+  { days: 30, label: '30 jours', amount_cents: 29_99 },
+] as const

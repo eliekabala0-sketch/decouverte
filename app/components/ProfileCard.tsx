@@ -1,6 +1,7 @@
 import { View, Text, StyleSheet, Image } from 'react-native'
 import { useTheme } from '@/theme/ThemeContext'
 import type { Profile } from '../../lib/types'
+import { isProfileBoostedForListing } from '../../lib/boostVisibility'
 import { colors } from '@/theme/theme'
 
 type ProfileCardProps = {
@@ -13,7 +14,7 @@ export function ProfileCard({ profile, canViewFull = true }: ProfileCardProps) {
   const theme = useTheme()
   const showFull = canViewFull
   const avatarSource = showFull && profile.photo ? { uri: profile.photo } : null
-  const boosted = !!profile.boost_reason
+  const boosted = isProfileBoostedForListing(profile)
 
   return (
     <View style={[styles.card, { backgroundColor: theme.colors.surfaceElevated, borderColor: theme.colors.border }]}>

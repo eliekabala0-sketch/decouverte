@@ -37,6 +37,9 @@ export interface Profile {
   /** Colonne `profiles.mode_serieux_active` (filtre Mode Sérieux). */
   mode_serieux_active?: boolean
   boost_reason: string | null
+  /** Fin de campagne boost (si colonne présente en base, migration 021). */
+  boosted_until?: string | null
+  is_boosted?: boolean | null
   country: string | null
   role: string | null
 }

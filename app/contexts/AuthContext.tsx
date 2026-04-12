@@ -26,36 +26,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const expectedUserIdRef = useRef<string | null>(null)
 
   const loadProfilesForUser = useCallback(async (userId: string) => {
-    const profileSelect =
+    const profileSelectCore =
       'id,created_at,phone,photo,gender,city,commune,bio,status,is_verified,username,age,boost_reason,country,role'
 
     const run = async () => {
-      let prof: Profile | null = null
-      let profErr: { message?: string } | null = null
-
-      const byId = await supabase.from('profiles').select(profileSelect).eq('id', userId).maybeSingle()
-      if (byId.error) {
-        profErr = byId.error
-      } else if (byId.data) {
-        prof = byId.data as Profile
-      } else {
-        const byUid = await supabase.from('profiles').select(profileSelect).eq('user_id', userId).maybeSingle()
-        if (byUid.error) {
-          const msg = (byUid.error.message || '').toLowerCase()
-          if (!msg.includes('user_id') || (!msg.includes('does not exist') && !msg.includes('schema cache'))) {
-            profErr = byUid.error
-          }
-        } else {
-          prof = (byUid.data as Profile | null) ?? null
-        }
-      }
+      const { data: prof, error: profErr } = await supabase
+        .from('profiles')
+        .select(profileSelectCore)
+        .eq('id', userId)
+        .maybeSingle()
 
       if (expectedUserIdRef.current !== userId) return
       if (profErr) {
         console.warn('[Auth] profiles:', profErr.message)
         setProfile(null)
       } else {
-        setProfile(prof)
+        let merged = (prof as Profile | null) ?? null
+        if (merged?.id) {
+          const extra = await supabase
+            .from('profiles')
+            .select('boosted_until,is_boosted')
+            .eq('id', userId)
+            .maybeSingle()
+          if (!extra.error && extra.data) {
+            merged = { ...merged, ...(extra.data as Pick<Profile, 'boosted_until' | 'is_boosted'>) }
+          }
+        }
+        setProfile(merged)
       }
 
       const { data: acc, error: accErr } = await supabase

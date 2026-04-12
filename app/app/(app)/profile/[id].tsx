@@ -44,14 +44,25 @@ export default function ProfileDetailScreen() {
         .eq('key', 'reciprocal_matching_enabled')
         .maybeSingle()
       setReciprocalEnabled(Boolean((setting as { value?: boolean } | null)?.value))
-      const { data } = await supabase
-        .from('profiles')
-        .select(
-          'id,created_at,phone,photo,gender,city,commune,bio,status,is_verified,username,age,boost_reason,country,role'
-        )
-        .eq('id', params.id)
-        .single()
-      setProfile(data as Profile | null)
+      const core =
+        'id,created_at,phone,photo,gender,city,commune,bio,status,is_verified,username,age,boost_reason,country,role'
+      const { data: coreRow, error: coreErr } = await supabase.from('profiles').select(core).eq('id', params.id).single()
+      if (coreErr) {
+        setProfile(null)
+        return
+      }
+      let merged = coreRow as Profile | null
+      if (merged?.id) {
+        const extra = await supabase
+          .from('profiles')
+          .select('boosted_until,is_boosted')
+          .eq('id', params.id)
+          .maybeSingle()
+        if (!extra.error && extra.data) {
+          merged = { ...merged, ...(extra.data as Pick<Profile, 'boosted_until' | 'is_boosted'>) }
+        }
+      }
+      setProfile(merged)
       if (params.id) {
         try {
           const rows = await listProfilePhotos(params.id)

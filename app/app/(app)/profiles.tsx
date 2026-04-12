@@ -8,11 +8,12 @@ import { MODES } from '../../../lib/constants'
 import { canViewFullProfiles } from '../../../lib/access'
 import { supabase } from '@/lib/supabase'
 import type { Profile } from '../../../lib/types'
+import { isProfileBoostedForListing } from '../../../lib/boostVisibility'
 
 function sortBoostThenRecent(list: Profile[]): Profile[] {
   return [...list].sort((a, b) => {
-    const boost = (p: Profile) => (p.boost_reason ? 1 : 0)
-    return boost(b) - boost(a) || new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    const score = (p: Profile) => (isProfileBoostedForListing(p) ? 1 : 0)
+    return score(b) - score(a) || new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
   })
 }
 
@@ -58,7 +59,7 @@ export default function ProfilesScreen() {
         const { data, error } = await supabase
           .from('profiles')
           .select(
-            'id,created_at,phone,photo,gender,city,commune,bio,status,is_verified,username,age,boost_reason,country,role'
+            'id,created_at,phone,photo,gender,city,commune,bio,status,is_verified,username,age,boost_reason,boosted_until,is_boosted,country,role'
           )
           .eq('status', 'active')
           .order('created_at', { ascending: false })
