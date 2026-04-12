@@ -2,6 +2,12 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
 
+const allowedHosts = [
+  'decouverte-production.up.railway.app',
+  'localhost',
+  '127.0.0.1',
+]
+
 export default defineConfig({
   plugins: [react()],
   resolve: {
@@ -13,5 +19,6 @@ export default defineConfig({
       '@shared': path.resolve(__dirname, '../lib'),
     },
   },
-  server: { port: 3001 },
+  server: { port: 3001, allowedHosts },
+  preview: { allowedHosts },
 })
