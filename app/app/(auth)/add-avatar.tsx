@@ -5,12 +5,7 @@ import * as ImagePicker from 'expo-image-picker'
 import { Image } from 'expo-image'
 import { useTheme } from '@/theme/ThemeContext'
 import { useAuth } from '@/contexts/AuthContext'
-import { supabase } from '@/lib/supabase'
-
-const BUCKET = 'admin-media'
-const FETCH_IMAGE_MS = 45000
-const UPLOAD_MS = 120000
-const DB_UPDATE_MS = 30000
+import { insertProfilePhoto, setPrimaryPhoto, uploadProfilePhoto } from '../../lib/profilePhotos'
 const REFRESH_MS = 8000
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
@@ -27,26 +22,6 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
       }
     )
   })
-}
-
-/** Sur web, fetch(uri) après recadrage peut rester bloqué indéfiniment — AbortController + pas de crop web. */
-async function readImageForUpload(uri: string): Promise<{ blob: Blob; contentType: string }> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), FETCH_IMAGE_MS)
-  try {
-    const res = await fetch(uri, { signal: controller.signal })
-    if (!res.ok) throw new Error(`Lecture image: ${res.status}`)
-    const blob = await res.blob()
-    const contentType = blob.type && blob.type !== '' ? blob.type : 'image/jpeg'
-    return { blob, contentType }
-  } catch (e) {
-    if (e instanceof Error && e.name === 'AbortError') {
-      throw new Error('La lecture de l’image a expiré. Réessayez ou choisissez une autre photo.')
-    }
-    throw e
-  } finally {
-    clearTimeout(timer)
-  }
 }
 
 export default function AddAvatarScreen() {
@@ -86,42 +61,9 @@ export default function AddAvatarScreen() {
     if (!user?.id || !localUri) return
     setSaving(true)
     try {
-      const { blob, contentType } = await readImageForUpload(localUri)
-      const ext = contentType.includes('png') ? 'png' : contentType.includes('webp') ? 'webp' : 'jpg'
-      const path = `avatars/${user.id}/${Date.now()}.${ext}`
-
-      const uploadResult = await withTimeout(
-        (async () =>
-          await supabase.storage.from(BUCKET).upload(path, blob, {
-            cacheControl: '3600',
-            upsert: true,
-            contentType,
-          }))(),
-        UPLOAD_MS,
-        'Envoi vers le stockage'
-      )
-      const { error: upErr } = uploadResult
-      if (upErr) {
-        setErrorText(
-          `${upErr.message || 'Échec de l’envoi'}. Vérifiez la connexion et les droits Storage (bucket admin-media).`
-        )
-        return
-      }
-
-      const { data: pub } = supabase.storage.from(BUCKET).getPublicUrl(path)
-      const publicUrl = pub.publicUrl
-
-      const updateResult = await withTimeout(
-        (async () =>
-          await supabase.from('profiles').update({ photo: publicUrl }).eq('id', user.id))(),
-        DB_UPDATE_MS,
-        'Enregistrement du profil'
-      )
-      const { error: dbErr } = updateResult
-      if (dbErr) {
-        setErrorText(dbErr.message || 'Erreur lors de l’enregistrement du profil.')
-        return
-      }
+      const publicUrl = await uploadProfilePhoto(user.id, localUri)
+      const photoId = await insertProfilePhoto(user.id, publicUrl, true)
+      await setPrimaryPhoto(user.id, photoId, publicUrl)
 
       try {
         await withTimeout(refreshProfile(), REFRESH_MS, 'Actualisation du profil')

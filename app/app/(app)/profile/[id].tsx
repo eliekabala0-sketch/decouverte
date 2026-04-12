@@ -16,7 +16,7 @@ import { GENDER_LABELS } from '../../../../lib/constants'
 import { canUnlockContact, canViewFullProfiles, remainingContacts } from '../../../../lib/access'
 import { supabase } from '@/lib/supabase'
 import type { Profile } from '../../../../lib/types'
-import { listProfilePhotos, type ProfilePhotoRow } from '@/lib/profilePhotos'
+import { listProfilePhotos, type ProfilePhotoRow } from '../../../lib/profilePhotos'
 
 export default function ProfileDetailScreen() {
   const router = useRouter()
