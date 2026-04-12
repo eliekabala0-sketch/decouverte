@@ -8,6 +8,7 @@ import { canViewFullProfiles, remainingContacts } from '../../../lib/access'
 import { supabase } from '@/lib/supabase'
 import {
   GENDER_REQUIRES_PROFILES_ACCESS_PAYMENT,
+  PAYMENT_METADATA_KIND_VISIBILITY_BOOST,
   PAYMENT_PROVIDER_BADIBOSS,
   PROFILES_ACCESS_DAYS,
   VISIBILITY_BOOST_TIERS,
@@ -53,8 +54,8 @@ export default function PaymentsScreen() {
         .from('payments')
         .select('id')
         .eq('user_id', user.id)
-        .eq('type', 'boost')
         .eq('status', 'pending')
+        .contains('metadata', { payment_kind: PAYMENT_METADATA_KIND_VISIBILITY_BOOST })
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle()
@@ -113,12 +114,12 @@ export default function PaymentsScreen() {
         .from('payments')
         .insert({
           user_id: user.id,
-          type: 'boost',
           provider: PAYMENT_PROVIDER_BADIBOSS,
           amount_cents: tier.amount_cents,
           currency: 'USD',
           status: 'pending',
           metadata: {
+            payment_kind: PAYMENT_METADATA_KIND_VISIBILITY_BOOST,
             duration_days: tier.days,
             profile_id: profile.id,
             tier_label: tier.label,
@@ -151,9 +152,15 @@ export default function PaymentsScreen() {
         .eq('user_id', user.id)
         .maybeSingle()
       if (selErr) throw new Error(selErr.message || 'Lecture paiement impossible')
-      const row = pay as { status?: string; metadata?: { duration_days?: number } } | null
+      const row = pay as {
+        status?: string
+        metadata?: { payment_kind?: string; duration_days?: number }
+      } | null
       if (!row || row.status !== 'pending') {
         throw new Error('Aucune commande boost en attente pour ce compte.')
+      }
+      if (row.metadata?.payment_kind !== PAYMENT_METADATA_KIND_VISIBILITY_BOOST) {
+        throw new Error('Cette commande n’est pas une mise en avant valide.')
       }
       const days = Number(row.metadata?.duration_days) || VISIBILITY_BOOST_TIERS[0].days
 

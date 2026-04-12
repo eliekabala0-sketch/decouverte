@@ -58,6 +58,12 @@ export const MIN_PHONE_DIGITS_SIGNUP = 10
 /** Durée en jours de l'accès profils/photos après paiement 1. */
 export const PROFILES_ACCESS_DAYS = 30
 
+/**
+ * Discrimination des commandes « mise en avant » dans payments.metadata (sans colonne type en base).
+ * Doit rester aligné avec la politique RLS migration 022.
+ */
+export const PAYMENT_METADATA_KIND_VISIBILITY_BOOST = 'visibility_boost' as const
+
 /** Offres mise en avant (boost) : durée + prix TTC en centimes USD (paiement Badiboss). */
 export const VISIBILITY_BOOST_TIERS = [
   { days: 7, label: '7 jours', amount_cents: 9_99 },
