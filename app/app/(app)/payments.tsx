@@ -15,16 +15,17 @@ export default function PaymentsScreen() {
 
   const reciprocal = isOn('reciprocal_matching_enabled')
   const boostFlag = isOn('boost_enabled')
+  const packsModuleOn = isOn('contact_packs_enabled')
 
   const requiresProfilesPayment = profile
     ? GENDER_REQUIRES_PROFILES_ACCESS_PAYMENT.includes(profile.gender) || (profile.gender === 'F' && reciprocal)
     : false
   const hasProfilesAccess = profile ? canViewFullProfiles(profile.gender, profileAccess) : false
   const contactsLeft = remainingContacts(profileAccess)
-  const canBuyBoost =
-    !!boostFlag &&
-    !!profile &&
-    ((profile.gender === 'F' && !reciprocal) || (reciprocal && (profile.gender === 'F' || profile.gender === 'M')))
+  /** Packs contacts = logique homme par défaut ; femme seulement si réciprocité admin activée. */
+  const showContactPacks =
+    !!profile && packsModuleOn && (profile.gender === 'M' || (profile.gender === 'F' && reciprocal))
+  const canBuyBoost = !!boostFlag && !!profile
 
   const buyProfilesAccess = async () => {
     if (!user?.id || !profile) return
@@ -68,17 +69,20 @@ export default function PaymentsScreen() {
   const buyVisibilityBoost = async () => {
     if (!user?.id || !profile) return
     try {
-      await supabase.from('payments').insert({
+      const { error: payErr } = await supabase.from('payments').insert({
         user_id: user.id,
+        type: 'boost',
         provider: PAYMENT_PROVIDER_BADIBOSS,
-        amount: 0,
+        amount_cents: 0,
         currency: 'USD',
         status: 'completed',
+        metadata: { source: 'app_boost_simulation' },
       })
-      const { error } = await supabase.from('profiles').update({ boost_reason: 'paid' }).eq('id', user.id)
+      if (payErr) throw new Error(payErr.message || payErr.code || 'Échec enregistrement paiement boost')
+      const { error } = await supabase.from('profiles').update({ boost_reason: 'paid' }).eq('id', profile.id)
       if (error) throw error
       await refreshProfile()
-      Alert.alert('Boost activé', 'Votre profil est mis en avant.')
+      Alert.alert('Boost activé', 'Votre profil est mis en avant dans les listes.')
     } catch (e: any) {
       Alert.alert('Boost', e?.message ?? 'Impossible d’activer le boost.')
     }
@@ -90,6 +94,22 @@ export default function PaymentsScreen() {
         <Text style={{ color: c.primary, fontWeight: '600' }}>Retour</Text>
       </Pressable>
       <Text style={[styles.title, { color: c.text }]}>Paiements & Packs</Text>
+
+      {profile?.gender === 'F' && !reciprocal && canBuyBoost ? (
+        <View style={[styles.card, { backgroundColor: c.surface, borderWidth: 1, borderColor: c.primary }]}>
+          <Text style={[styles.cardTitle, { color: c.text }]}>Mise en avant (boost)</Text>
+          <Text style={[styles.cardDesc, { color: c.textSecondary }]}>
+            Sans mode réciproque, les packs « contacts homme » ne s’appliquent pas à votre parcours. Privilégiez la visibilité : votre profil remontera en premier dans les grilles.
+          </Text>
+          <Text style={[styles.status, { color: profile?.boost_reason ? c.success : c.textMuted }]}>
+            {profile?.boost_reason ? 'Boost actif' : 'Boost inactif'}
+          </Text>
+          <Pressable onPress={buyVisibilityBoost} style={[styles.btn, { backgroundColor: c.primary }]}>
+            <Text style={styles.btnText}>{profile?.boost_reason ? 'Réactiver le boost' : 'Activer le boost'}</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
       {requiresProfilesPayment ? (
         <View style={[styles.card, { backgroundColor: c.surface }]}>
           <Text style={[styles.cardTitle, { color: c.text }]}>Accès profils / photos</Text>
@@ -115,27 +135,31 @@ export default function PaymentsScreen() {
         <View style={[styles.card, { backgroundColor: c.surface }]}>
           <Text style={[styles.cardTitle, { color: c.text }]}>Accès profils / photos</Text>
           <Text style={[styles.cardDesc, { color: c.textSecondary }]}>
-            En configuration actuelle (sans réciprocité), l’accès aux listes ne passe pas par ce paiement. Utilisez la mise en avant ci-dessous pour plus de visibilité.
+            Sans réciprocité, vous n’achetez pas l’accès « type homme ». Utilisez le boost ci-dessus pour la visibilité.
           </Text>
         </View>
       ) : null}
-      <View style={[styles.card, { backgroundColor: c.surface }]}>
-        <Text style={[styles.cardTitle, { color: c.text }]}>Packs contacts</Text>
-        <Text style={[styles.cardDesc, { color: c.textSecondary }]}>
-          Quotas contacts + options photo selon le pack
-        </Text>
-        <Text style={[styles.status, { color: contactsLeft > 0 ? c.textSecondary : c.warning }]}>
-          {contactsLeft > 0 ? `Contacts restants : ${contactsLeft}` : 'Quota atteint : achat requis'}
-        </Text>
-        <Pressable onPress={() => router.push('/(app)/packs')} style={[styles.btn, { backgroundColor: c.accent }]}>
-          <Text style={styles.btnText}>Voir les packs</Text>
-        </Pressable>
-      </View>
-      {canBuyBoost ? (
+
+      {showContactPacks ? (
+        <View style={[styles.card, { backgroundColor: c.surface }]}>
+          <Text style={[styles.cardTitle, { color: c.text }]}>Packs contacts</Text>
+          <Text style={[styles.cardDesc, { color: c.textSecondary }]}>
+            Quotas contacts + options photo selon le pack (parcours homme, ou femme si réciprocité activée).
+          </Text>
+          <Text style={[styles.status, { color: contactsLeft > 0 ? c.textSecondary : c.warning }]}>
+            {contactsLeft > 0 ? `Contacts restants : ${contactsLeft}` : 'Quota atteint : achat requis'}
+          </Text>
+          <Pressable onPress={() => router.push('/(app)/packs')} style={[styles.btn, { backgroundColor: c.accent }]}>
+            <Text style={styles.btnText}>Voir les packs</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      {!(profile?.gender === 'F' && !reciprocal) && canBuyBoost ? (
         <View style={[styles.card, { backgroundColor: c.surface }]}>
           <Text style={[styles.cardTitle, { color: c.text }]}>Boost visibilité</Text>
           <Text style={[styles.cardDesc, { color: c.textSecondary }]}>
-            Mettez votre profil en avant auprès des utilisateurs.
+            Mettez votre profil en avant auprès des utilisateurs (listes triées avec les profils boostés en premier).
           </Text>
           <Text style={[styles.status, { color: profile?.boost_reason ? c.success : c.textMuted }]}>
             {profile?.boost_reason ? 'Boost actif' : 'Boost inactif'}

@@ -5,12 +5,13 @@ import { useTheme } from '@/theme/ThemeContext'
 import { useAuth } from '@/contexts/AuthContext'
 import { GENDER_LABELS, GENDER_REQUIRES_PROFILES_ACCESS_PAYMENT } from '../../../lib/constants'
 import { canViewFullProfiles, remainingContacts } from '../../../lib/access'
+import { roleIsAdmin } from '../../../lib/profileRole'
 
 export default function AccountScreen() {
   const router = useRouter()
   const { colors } = useTheme()
   const { profile, profileAccess, signOut } = useAuth()
-  const isAdmin = profile?.role === 'admin'
+  const isAdmin = roleIsAdmin(profile?.role)
   const [signingOut, setSigningOut] = useState(false)
 
   const handleSignOut = async () => {

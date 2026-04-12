@@ -9,6 +9,13 @@ import { canViewFullProfiles } from '../../../lib/access'
 import { supabase } from '@/lib/supabase'
 import type { Profile } from '../../../lib/types'
 
+function sortBoostThenRecent(list: Profile[]): Profile[] {
+  return [...list].sort((a, b) => {
+    const boost = (p: Profile) => (p.boost_reason ? 1 : 0)
+    return boost(b) - boost(a) || new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  })
+}
+
 export default function ProfilesScreen() {
   const router = useRouter()
   const { colors } = useTheme()
@@ -69,8 +76,7 @@ export default function ProfilesScreen() {
           return
         }
         if (myProfile.gender === 'M') {
-          // Mode standard: les hommes voient les profils femmes.
-          setProfiles(filteredSelf.filter((p) => p.gender === 'F'))
+          setProfiles(sortBoostThenRecent(filteredSelf.filter((p) => p.gender === 'F')))
           return
         }
         if (myProfile.gender === 'F' && !reciprocal) {
@@ -79,10 +85,10 @@ export default function ProfilesScreen() {
           return
         }
         if (myProfile.gender === 'F' && reciprocal) {
-          setProfiles(filteredSelf.filter((p) => p.gender === 'M'))
+          setProfiles(sortBoostThenRecent(filteredSelf.filter((p) => p.gender === 'M')))
           return
         }
-        setProfiles(filteredSelf)
+        setProfiles(sortBoostThenRecent(filteredSelf))
       } catch (e: unknown) {
         setLoadError(e instanceof Error ? e.message : 'Erreur de chargement')
       } finally {

@@ -26,20 +26,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const expectedUserIdRef = useRef<string | null>(null)
 
   const loadProfilesForUser = useCallback(async (userId: string) => {
+    const profileSelect =
+      'id,created_at,phone,photo,gender,city,commune,bio,status,is_verified,username,age,boost_reason,country,role'
+
     const run = async () => {
-      const { data: prof, error: profErr } = await supabase
-        .from('profiles')
-        .select(
-          'id,created_at,phone,photo,gender,city,commune,bio,status,is_verified,username,age,boost_reason,country,role'
-        )
-        .eq('id', userId)
-        .maybeSingle()
+      let prof: Profile | null = null
+      let profErr: { message?: string } | null = null
+
+      const byId = await supabase.from('profiles').select(profileSelect).eq('id', userId).maybeSingle()
+      if (byId.error) {
+        profErr = byId.error
+      } else if (byId.data) {
+        prof = byId.data as Profile
+      } else {
+        const byUid = await supabase.from('profiles').select(profileSelect).eq('user_id', userId).maybeSingle()
+        if (byUid.error) {
+          const msg = (byUid.error.message || '').toLowerCase()
+          if (!msg.includes('user_id') || (!msg.includes('does not exist') && !msg.includes('schema cache'))) {
+            profErr = byUid.error
+          }
+        } else {
+          prof = (byUid.data as Profile | null) ?? null
+        }
+      }
+
       if (expectedUserIdRef.current !== userId) return
       if (profErr) {
         console.warn('[Auth] profiles:', profErr.message)
         setProfile(null)
       } else {
-        setProfile((prof as Profile | null) ?? null)
+        setProfile(prof)
       }
 
       const { data: acc, error: accErr } = await supabase

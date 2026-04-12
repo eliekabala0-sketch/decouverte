@@ -21,6 +21,11 @@ export default function HomeScreen() {
   const massOn = isOn('mass_messages_enabled')
   const campaignsOn = isOn('ad_campaigns_enabled')
   const packsOn = isOn('contact_packs_enabled')
+  const reciprocal = isOn('reciprocal_matching_enabled')
+  const boostOn = isOn('boost_enabled')
+  const showPacksQuickLink =
+    packsOn && profile && (profile.gender === 'M' || (profile.gender === 'F' && reciprocal))
+  const showBoostQuickLink = boostOn && profile?.gender === 'F' && !reciprocal
 
   useEffect(() => {
     if (!user?.id || !massOn) {
@@ -132,7 +137,7 @@ export default function HomeScreen() {
             <Text style={[styles.linkSub, { color: colors.textSecondary }]}>Annonces et offres</Text>
           </Pressable>
         ) : null}
-        {packsOn ? (
+        {showPacksQuickLink ? (
           <Pressable
             onPress={() => router.push('/(app)/packs')}
             style={({ pressed }) => [styles.linkCard, { backgroundColor: colors.card, opacity: pressed ? 0.9 : 1 }]}
@@ -140,6 +145,16 @@ export default function HomeScreen() {
             <Text style={styles.linkEmoji}>💬</Text>
             <Text style={[styles.linkTitle, { color: colors.text }]}>Packs contacts</Text>
             <Text style={[styles.linkSub, { color: colors.textSecondary }]}>Débloquer des échanges</Text>
+          </Pressable>
+        ) : null}
+        {showBoostQuickLink ? (
+          <Pressable
+            onPress={() => router.push('/(app)/payments')}
+            style={({ pressed }) => [styles.linkCard, { backgroundColor: colors.card, opacity: pressed ? 0.9 : 1 }]}
+          >
+            <Text style={styles.linkEmoji}>⭐</Text>
+            <Text style={[styles.linkTitle, { color: colors.text }]}>Mise en avant</Text>
+            <Text style={[styles.linkSub, { color: colors.textSecondary }]}>Booster votre visibilité</Text>
           </Pressable>
         ) : null}
       </View>
