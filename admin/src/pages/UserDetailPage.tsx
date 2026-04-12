@@ -163,6 +163,10 @@ export function UserDetailPage() {
         content: prefix + dm.trim(),
       })
       if (mErr) throw new Error(mErr.message)
+      await supabase
+        .from('conversations')
+        .update({ last_message_at: new Date().toISOString() })
+        .eq('id', convId)
       setDm('')
       setMsg({ type: 'success', text: 'Message envoyé (visible dans Messages de l’utilisateur).' })
     } catch (e: unknown) {
