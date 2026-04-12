@@ -21,6 +21,9 @@
 }
 body { margin: 0; min-height: 100vh; }
 #root { min-height: 100vh; }
+/* Utilisé par App (route protégée) avant le layout admin */
+.fullscreen { min-height: 100vh; display: flex; }
+.center { align-items: center; justify-content: center; flex-direction: column; }
 a { color: var(--primary); text-decoration: none; }
 a:hover { text-decoration: underline; }
 button {

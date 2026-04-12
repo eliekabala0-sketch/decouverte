@@ -1,10 +1,14 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useAdminAuth } from '../contexts/AdminAuthContext'
 import './LoginPage.css'
 
+type LoginLocationState = { authError?: string | null }
+
 export function LoginPage() {
   const navigate = useNavigate()
+  const location = useLocation()
+  const redirectedMessage = (location.state as LoginLocationState | null)?.authError
   const { signIn, authError } = useAdminAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -49,7 +53,9 @@ export function LoginPage() {
               required
             />
           </label>
-          {(error || authError) && <p className="login-error">{error || authError}</p>}
+          {(error || authError || redirectedMessage) && (
+            <p className="login-error">{error || authError || redirectedMessage}</p>
+          )}
           <button type="submit" disabled={loading}>
             {loading ? 'Connexion...' : 'Se connecter'}
           </button>

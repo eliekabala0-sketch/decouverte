@@ -14,62 +14,197 @@ export type AdminAuthContextType = {
 
 const AdminAuthContext = createContext<AdminAuthContextType | null>(null)
 
+/** Évite un spinner infini si l’API auth ou PostgREST ne répond pas. */
+const SESSION_TIMEOUT_MS = 20_000
+const PROFILE_ROLE_TIMEOUT_MS = 15_000
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = window.setTimeout(() => {
+      reject(new Error(`${label} — délai ${ms} ms`))
+    }, ms)
+    promise.then(
+      (v) => {
+        window.clearTimeout(t)
+        resolve(v)
+      },
+      (e) => {
+        window.clearTimeout(t)
+        reject(e)
+      }
+    )
+  })
+}
+
+async function fetchProfileIsAdmin(userId: string): Promise<{ ok: boolean; error: Error | null }> {
+  if (!userId) {
+    return { ok: false, error: null }
+  }
+  const res = await withTimeout(
+    Promise.resolve(
+      supabase.from('profiles').select('role').eq('id', userId).maybeSingle()
+    ),
+    PROFILE_ROLE_TIMEOUT_MS,
+    'Lecture du rôle (profiles)'
+  )
+  const err = res.error as Error | null | undefined
+  if (err) {
+    console.error('[admin-auth] profiles.select(role)', err)
+    return { ok: false, error: err instanceof Error ? err : new Error(String(err)) }
+  }
+  const ok = (res.data as { role?: string } | null)?.role === 'admin'
+  return { ok, error: null }
+}
+
 export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [isAdmin, setIsAdmin] = useState(false)
   const [loading, setLoading] = useState(true)
   const [authError, setAuthError] = useState<string | null>(null)
 
-  const resolveAdmin = async (u: User | null) => {
-    if (!u?.id) {
-      setIsAdmin(false)
-      return false
-    }
-    const { data } = await supabase.from('profiles').select('role').eq('id', u.id).maybeSingle()
-    const ok = (data as { role?: string } | null)?.role === 'admin'
-    setIsAdmin(ok)
-    return ok
-  }
-
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      const current = session?.user ?? null
-      setUser(current)
-      await resolveAdmin(current)
-      setLoading(false)
-    })
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+    let cancelled = false
+
+    const finishBootstrap = () => {
+      if (!cancelled) setLoading(false)
+    }
+
+    const applyUserAndAdmin = async (current: User | null) => {
+      if (!current?.id) {
+        setIsAdmin(false)
+        setAuthError(null)
+        return
+      }
+      const { ok, error } = await fetchProfileIsAdmin(current.id)
+      if (cancelled) return
+      if (error) {
+        setIsAdmin(false)
+        setAuthError(
+          'Impossible de vérifier le rôle admin (réseau, RLS ou délai dépassé). Réessayez dans un instant.'
+        )
+        return
+      }
+      setIsAdmin(ok)
+      if (!ok) setAuthError('Compte non autorisé pour le dashboard admin.')
+      else setAuthError(null)
+    }
+
+    const runBootstrap = async () => {
+      try {
+        const sessionRes = await withTimeout(
+          supabase.auth.getSession(),
+          SESSION_TIMEOUT_MS,
+          'getSession()'
+        )
+        const session = sessionRes.data?.session ?? null
+        if (sessionRes.error) {
+          console.error('[admin-auth] getSession error', sessionRes.error)
+        }
+        const current = session?.user ?? null
+        if (!cancelled) setUser(current)
+        await applyUserAndAdmin(current)
+      } catch (e) {
+        console.error('[admin-auth] bootstrap', e)
+        if (!cancelled) {
+          setUser(null)
+          setIsAdmin(false)
+          setAuthError(
+            e instanceof Error
+              ? `Échec du chargement de la session : ${e.message}`
+              : 'Échec du chargement de la session.'
+          )
+        }
+      } finally {
+        finishBootstrap()
+      }
+    }
+
+    void runBootstrap()
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (cancelled) return
       if (event === 'SIGNED_OUT') {
         setUser(null)
         setIsAdmin(false)
         setAuthError('Session expirée. Veuillez vous reconnecter.')
-      } else {
-        const current = session?.user ?? null
-        setUser(current)
-        const ok = await resolveAdmin(current)
-        setAuthError(ok ? null : 'Compte non autorisé pour le dashboard admin.')
+        return
+      }
+      const current = session?.user ?? null
+      setUser(current)
+      try {
+        await applyUserAndAdmin(current)
+      } catch (e) {
+        console.error('[admin-auth] onAuthStateChange', e)
+        setIsAdmin(false)
+        setAuthError(
+          e instanceof Error
+            ? `Erreur lors de la mise à jour de la session : ${e.message}`
+            : 'Erreur lors de la mise à jour de la session.'
+        )
       }
     })
-    return () => subscription.unsubscribe()
+
+    return () => {
+      cancelled = true
+      subscription.unsubscribe()
+    }
   }, [])
 
   const signIn = async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password })
     if (error) {
       setAuthError(error.message || 'Erreur de connexion.')
-    } else {
-      const current = (await supabase.auth.getUser()).data.user
-      const ok = await resolveAdmin(current ?? null)
-      if (!ok) {
-        setAuthError('Compte non autorisé pour le dashboard admin.')
-        await supabase.auth.signOut()
-        setUser(null)
-        return { error: new Error('Compte non autorisé pour le dashboard admin.') }
-      }
-      setUser(current ?? null)
-      setAuthError(null)
+      return { error: error as Error }
     }
-    return { error: error ?? null }
+    let current: User | null = null
+    try {
+      const gu = await withTimeout(supabase.auth.getUser(), SESSION_TIMEOUT_MS, 'getUser()')
+      if (gu.error) console.error('[admin-auth] getUser after signIn', gu.error)
+      current = gu.data?.user ?? null
+    } catch (e) {
+      console.error('[admin-auth] getUser timeout', e)
+      setAuthError(
+        e instanceof Error
+          ? `Connexion OK mais lecture du compte trop lente : ${e.message}`
+          : 'Connexion OK mais lecture du compte impossible.'
+      )
+      await supabase.auth.signOut()
+      setUser(null)
+      setIsAdmin(false)
+      return { error: e instanceof Error ? e : new Error('getUser failed') }
+    }
+
+    if (!current?.id) {
+      setAuthError('Session invalide après connexion.')
+      await supabase.auth.signOut()
+      setUser(null)
+      setIsAdmin(false)
+      return { error: new Error('Session invalide après connexion.') }
+    }
+
+    const { ok, error: roleErr } = await fetchProfileIsAdmin(current.id)
+    if (roleErr) {
+      setAuthError(
+        'Impossible de vérifier le rôle admin (réseau, RLS ou délai). Réessayez dans un instant.'
+      )
+      await supabase.auth.signOut()
+      setUser(null)
+      setIsAdmin(false)
+      return { error: roleErr }
+    }
+    if (!ok) {
+      setAuthError('Compte non autorisé pour le dashboard admin.')
+      await supabase.auth.signOut()
+      setUser(null)
+      setIsAdmin(false)
+      return { error: new Error('Compte non autorisé pour le dashboard admin.') }
+    }
+    setUser(current)
+    setIsAdmin(true)
+    setAuthError(null)
+    return { error: null }
   }
 
   const signOut = async () => {

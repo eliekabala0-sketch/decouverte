@@ -17,10 +17,19 @@ import { UserDetailPage } from './pages/UserDetailPage'
 import { useAdminAuth } from './contexts/AdminAuthContext'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, isAdmin, loading } = useAdminAuth()
-  if (loading) return <div className="fullscreen center">Chargement...</div>
-  if (!isAuthenticated) return <Navigate to="/login" replace />
-  if (!isAdmin) return <Navigate to="/login" replace />
+  const { isAuthenticated, isAdmin, loading, authError } = useAdminAuth()
+  if (loading) {
+    return (
+      <div className="fullscreen center">
+        <p>Chargement du tableau de bord…</p>
+        <p className="text-secondary" style={{ fontSize: '0.9rem', marginTop: 8 }}>
+          Si cet écran reste bloqué plus de ~20 s, vérifiez la console (F12) et la connexion à Supabase.
+        </p>
+      </div>
+    )
+  }
+  if (!isAuthenticated) return <Navigate to="/login" replace state={{ authError }} />
+  if (!isAdmin) return <Navigate to="/login" replace state={{ authError }} />
   return <>{children}</>
 }
 
