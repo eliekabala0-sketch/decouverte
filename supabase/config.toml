@@ -1,0 +1,4 @@
+# Config locale / CLI Supabase — les Edge Functions utilisent les secrets du projet (SERVICE_ROLE_KEY, etc.).
+
+[functions.admin-set-password]
+verify_jwt = true

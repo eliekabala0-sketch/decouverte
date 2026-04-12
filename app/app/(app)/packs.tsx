@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Alert
 import { useRouter } from 'expo-router'
 import { useTheme } from '@/theme/ThemeContext'
 import { useAuth } from '@/contexts/AuthContext'
+import { useAppFeatureFlags } from '@/lib/useAppFeatureFlags'
 import { supabase } from '@/lib/supabase'
 import type { ContactPack } from '../../../lib/types'
 import { remainingContacts } from '../../../lib/access'
@@ -16,6 +17,8 @@ export default function PacksScreen() {
   const router = useRouter()
   const { colors } = useTheme()
   const { user, profileAccess, refreshProfile } = useAuth()
+  const { isOn } = useAppFeatureFlags()
+  const packsOn = isOn('contact_packs_enabled')
   const [packs, setPacks] = useState<ContactPack[]>([])
   const [loading, setLoading] = useState(true)
   const [buyingId, setBuyingId] = useState<string | null>(null)
@@ -23,6 +26,11 @@ export default function PacksScreen() {
   const contactsLeft = useMemo(() => remainingContacts(profileAccess), [profileAccess])
 
   useEffect(() => {
+    if (!packsOn) {
+      setPacks([])
+      setLoading(false)
+      return
+    }
     const load = async () => {
       const { data } = await supabase
         .from('contact_packs')
@@ -32,8 +40,8 @@ export default function PacksScreen() {
       setPacks((data ?? []) as ContactPack[])
       setLoading(false)
     }
-    load()
-  }, [])
+    void load()
+  }, [packsOn])
 
   const buyPack = async (pack: ContactPack) => {
     if (!user?.id) return
@@ -75,6 +83,18 @@ export default function PacksScreen() {
     } finally {
       setBuyingId(null)
     }
+  }
+
+  if (!packsOn) {
+    return (
+      <ScrollView style={[styles.container, { backgroundColor: colors.background }]} contentContainerStyle={styles.content}>
+        <Pressable onPress={() => router.back()}>
+          <Text style={{ color: colors.primary, fontWeight: '600' }}>Retour</Text>
+        </Pressable>
+        <Text style={[styles.title, { color: colors.text }]}>Packs contacts</Text>
+        <Text style={[styles.subtitle, { color: colors.textMuted }]}>Module désactivé dans l’administration.</Text>
+      </ScrollView>
+    )
   }
 
   return (

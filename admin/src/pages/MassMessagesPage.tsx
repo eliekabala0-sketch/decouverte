@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '@lib/supabase'
 import { useAdminAuth } from '../contexts/AdminAuthContext'
 import type { MassMessage, MassMessageContentType } from '@shared/types'
 import { MediaUpload } from '../components/MediaUpload'
+import { PageHeader } from '../components/PageHeader'
 import './DashboardPage.css'
 import { FeatureGate } from '../components/FeatureGate'
 
@@ -39,14 +40,15 @@ export function MassMessagesPage() {
     segment_value: '',
   })
 
-  useEffect(() => {
-    const load = async () => {
-      const { data } = await supabase.from('mass_messages').select('*').order('created_at', { ascending: false })
-      setMessages((data ?? []) as (MassMessage & { id: string })[])
-      setLoading(false)
-    }
-    load()
+  const load = useCallback(async () => {
+    const { data } = await supabase.from('mass_messages').select('*').order('created_at', { ascending: false })
+    setMessages((data ?? []) as (MassMessage & { id: string })[])
+    setLoading(false)
   }, [])
+
+  useEffect(() => {
+    void load()
+  }, [load])
 
   const sendNow = async (msg: MassMessage & { id: string }) => {
     const { error } = await supabase.from('mass_messages').update({ sent_at: new Date().toISOString() }).eq('id', msg.id)
@@ -58,35 +60,64 @@ export function MassMessagesPage() {
     setSubmitMessage({ type: 'success', text: `« ${msg.title} » envoyé aux destinataires du segment.` })
   }
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const resetForm = () =>
+    setForm({ title: '', body: '', content_type: 'text', image_url: '', video_url: '', segment: 'all', segment_value: '' })
+
+  const createDraft = async (): Promise<string | null> => {
     setSubmitMessage(null)
     if (form.content_type === 'image' && !form.image_url?.trim()) {
       setSubmitMessage({ type: 'error', text: 'Choisissez une image (import) ou passez en format Texte.' })
-      return
+      return null
     }
     if (form.content_type === 'video' && !form.video_url?.trim()) {
       setSubmitMessage({ type: 'error', text: 'Choisissez une vidéo (import) ou passez en format Texte.' })
-      return
+      return null
     }
-    const { error } = await supabase.from('mass_messages').insert({
-      title: form.title,
-      body: form.body,
-      content_type: form.content_type,
-      image_url: form.content_type === 'image' ? form.image_url || null : null,
-      video_url: form.content_type === 'video' ? form.video_url || null : null,
-      segment: form.segment,
-      segment_value: form.segment_value || null,
-      created_by: user?.id,
+    const { data, error } = await supabase
+      .from('mass_messages')
+      .insert({
+        title: form.title,
+        body: form.body,
+        content_type: form.content_type,
+        image_url: form.content_type === 'image' ? form.image_url || null : null,
+        video_url: form.content_type === 'video' ? form.video_url || null : null,
+        segment: form.segment,
+        segment_value: form.segment_value || null,
+        created_by: user?.id,
+      })
+      .select('id')
+      .single()
+    if (error) {
+      setSubmitMessage({ type: 'error', text: error.message })
+      return null
+    }
+    return (data as { id: string }).id
+  }
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const id = await createDraft()
+    if (!id) return
+    await load()
+    resetForm()
+    setSubmitMessage({
+      type: 'success',
+      text: 'Brouillon créé. Utilisez « Envoyer » dans le tableau ou « Créer et envoyer » pour publication immédiate dans l’app.',
     })
+  }
+
+  const createAndSendNow = async () => {
+    const id = await createDraft()
+    if (!id) return
+    const sentAt = new Date().toISOString()
+    const { error } = await supabase.from('mass_messages').update({ sent_at: sentAt }).eq('id', id)
     if (error) {
       setSubmitMessage({ type: 'error', text: error.message })
       return
     }
-    const { data } = await supabase.from('mass_messages').select('*').order('created_at', { ascending: false })
-    setMessages((data ?? []) as (MassMessage & { id: string })[])
-    setForm({ title: '', body: '', content_type: 'text', image_url: '', video_url: '', segment: 'all', segment_value: '' })
-    setSubmitMessage({ type: 'success', text: 'Message créé.' })
+    await load()
+    resetForm()
+    setSubmitMessage({ type: 'success', text: 'Message créé et visible dans l’app (Annonces) pour les segments concernés.' })
   }
 
   if (loading) return <div className="page-loading">Chargement...</div>
@@ -94,8 +125,11 @@ export function MassMessagesPage() {
   return (
     <FeatureGate feature="mass_messages_enabled">
       <div>
+        <PageHeader onRefresh={load} />
         <h1 className="page-title">Messages de masse</h1>
-        <p className="page-subtitle">Envoyer un message à tous les utilisateurs ou par segments (hommes, femmes, payants, ville, commune, mode).</p>
+        <p className="page-subtitle">
+          Les messages <strong>ne sont visibles dans l’app (Annonces)</strong> qu’après envoi : colonne <code>sent_at</code> renseignée. Sans envoi, aucun utilisateur ne les voit.
+        </p>
         {submitMessage && (
           <div className={`dashboard-message ${submitMessage.type === 'error' ? 'dashboard-message-error' : 'dashboard-message-success'}`} role="alert">
             {submitMessage.text}
@@ -159,7 +193,10 @@ export function MassMessagesPage() {
               </div>
             )}
             <div className="form-actions">
-              <button type="submit">Créer le message (envoi à configurer)</button>
+              <button type="submit">Créer brouillon</button>
+              <button type="button" className="secondary" onClick={() => void createAndSendNow()}>
+                Créer et envoyer maintenant
+              </button>
             </div>
           </form>
         </section>

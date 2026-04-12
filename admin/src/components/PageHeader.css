@@ -1,0 +1,19 @@
+.page-header-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.page-header-title-inline {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--admin-text-muted, #888);
+  margin-left: auto;
+}
+
+.page-header-back,
+.page-header-refresh {
+  margin: 0;
+}

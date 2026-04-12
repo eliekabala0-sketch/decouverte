@@ -2,6 +2,7 @@ import { View, Text, StyleSheet, ScrollView, Pressable, Alert } from 'react-nati
 import { useRouter } from 'expo-router'
 import { useTheme } from '@/theme/ThemeContext'
 import { useAuth } from '@/contexts/AuthContext'
+import { useAppFeatureFlags } from '@/lib/useAppFeatureFlags'
 import { canViewFullProfiles, remainingContacts } from '../../../lib/access'
 import { supabase } from '@/lib/supabase'
 import { GENDER_REQUIRES_PROFILES_ACCESS_PAYMENT, PAYMENT_PROVIDER_BADIBOSS, PROFILES_ACCESS_DAYS } from '../../../lib/constants'
@@ -10,13 +11,20 @@ export default function PaymentsScreen() {
   const router = useRouter()
   const { colors: c } = useTheme()
   const { user, profile, profileAccess, refreshProfile } = useAuth()
+  const { isOn } = useAppFeatureFlags()
+
+  const reciprocal = isOn('reciprocal_matching_enabled')
+  const boostFlag = isOn('boost_enabled')
 
   const requiresProfilesPayment = profile
-    ? GENDER_REQUIRES_PROFILES_ACCESS_PAYMENT.includes(profile.gender)
+    ? GENDER_REQUIRES_PROFILES_ACCESS_PAYMENT.includes(profile.gender) || (profile.gender === 'F' && reciprocal)
     : false
   const hasProfilesAccess = profile ? canViewFullProfiles(profile.gender, profileAccess) : false
   const contactsLeft = remainingContacts(profileAccess)
-  const canBuyBoost = profile?.gender === 'F'
+  const canBuyBoost =
+    !!boostFlag &&
+    !!profile &&
+    ((profile.gender === 'F' && !reciprocal) || (reciprocal && (profile.gender === 'F' || profile.gender === 'M')))
 
   const buyProfilesAccess = async () => {
     if (!user?.id || !profile) return
@@ -82,29 +90,35 @@ export default function PaymentsScreen() {
         <Text style={{ color: c.primary, fontWeight: '600' }}>Retour</Text>
       </Pressable>
       <Text style={[styles.title, { color: c.text }]}>Paiements & Packs</Text>
-      <View style={[styles.card, { backgroundColor: c.surface }]}>
-        <Text style={[styles.cardTitle, { color: c.text }]}>Accès profils / photos</Text>
-        <Text style={[styles.cardDesc, { color: c.textSecondary }]}>
-          Hommes : débloquez l’affichage complet via quota photo premium ou pack (voir schéma profile_access).
-        </Text>
-        {profile ? (
-          <Text style={[styles.status, { color: hasProfilesAccess ? c.success : c.textMuted }]}>
-            {hasProfilesAccess
-              ? profileAccess?.all_profiles_access
-                ? 'Accès premium actif'
-                : `Quota photos utilisé : ${profileAccess?.photo_quota_used ?? 0} / ${profileAccess?.photo_quota ?? 0}`
-              : requiresProfilesPayment
-                ? 'Non actif'
-                : 'Inscription libre'}
+      {requiresProfilesPayment ? (
+        <View style={[styles.card, { backgroundColor: c.surface }]}>
+          <Text style={[styles.cardTitle, { color: c.text }]}>Accès profils / photos</Text>
+          <Text style={[styles.cardDesc, { color: c.textSecondary }]}>
+            {profile?.gender === 'F' && reciprocal
+              ? 'Mode réciproque : même logique d’accès payant que pour les hommes pour voir les profils du genre recherché.'
+              : 'Débloquez l’affichage complet via quota photo premium ou pack (voir profile_access).'}
           </Text>
-        ) : null}
-        <Pressable
-          onPress={buyProfilesAccess}
-          style={[styles.btn, { backgroundColor: c.primary }]}
-        >
-          <Text style={styles.btnText}>Payer avec Badiboss Pay</Text>
-        </Pressable>
-      </View>
+          {profile ? (
+            <Text style={[styles.status, { color: hasProfilesAccess ? c.success : c.textMuted }]}>
+              {hasProfilesAccess
+                ? profileAccess?.all_profiles_access
+                  ? 'Accès premium actif'
+                  : `Quota photos utilisé : ${profileAccess?.photo_quota_used ?? 0} / ${profileAccess?.photo_quota ?? 0}`
+                : 'Non actif'}
+            </Text>
+          ) : null}
+          <Pressable onPress={buyProfilesAccess} style={[styles.btn, { backgroundColor: c.primary }]}>
+            <Text style={styles.btnText}>Payer avec Badiboss Pay</Text>
+          </Pressable>
+        </View>
+      ) : profile?.gender === 'F' ? (
+        <View style={[styles.card, { backgroundColor: c.surface }]}>
+          <Text style={[styles.cardTitle, { color: c.text }]}>Accès profils / photos</Text>
+          <Text style={[styles.cardDesc, { color: c.textSecondary }]}>
+            En configuration actuelle (sans réciprocité), l’accès aux listes ne passe pas par ce paiement. Utilisez la mise en avant ci-dessous pour plus de visibilité.
+          </Text>
+        </View>
+      ) : null}
       <View style={[styles.card, { backgroundColor: c.surface }]}>
         <Text style={[styles.cardTitle, { color: c.text }]}>Packs contacts</Text>
         <Text style={[styles.cardDesc, { color: c.textSecondary }]}>

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { View, Text, StyleSheet, FlatList, Image, Pressable, ActivityIndicator, Linking } from 'react-native'
 import { useTheme } from '@/theme/ThemeContext'
 import { useAuth } from '@/contexts/AuthContext'
+import { useAppFeatureFlags } from '@/lib/useAppFeatureFlags'
 import { supabase } from '@/lib/supabase'
 import { canViewFullProfiles, remainingContacts } from '../../../lib/access'
 import type { MassMessage, ProfileAccess } from '../../../lib/types'
@@ -32,11 +33,19 @@ function matchesSegment(
 
 export default function AnnouncementsScreen() {
   const { colors } = useTheme()
-  const { profile, profileAccess } = useAuth()
+  const { profile, profileAccess, user } = useAuth()
+  const { isOn } = useAppFeatureFlags()
   const [messages, setMessages] = useState<MassMessage[]>([])
   const [loading, setLoading] = useState(true)
 
+  const massOn = isOn('mass_messages_enabled')
+
   useEffect(() => {
+    if (!massOn) {
+      setMessages([])
+      setLoading(false)
+      return
+    }
     const load = async () => {
       const { data } = await supabase
         .from('mass_messages')
@@ -48,13 +57,36 @@ export default function AnnouncementsScreen() {
       setMessages(filtered)
       setLoading(false)
     }
-    load()
-  }, [profile?.id, profileAccess?.user_id])
+    void load()
+  }, [profile?.id, profileAccess?.user_id, massOn])
+
+  useEffect(() => {
+    if (!user?.id || !massOn || loading) return
+    const mark = async () => {
+      const now = new Date().toISOString()
+      await supabase.from('user_announcement_read_state').upsert(
+        { user_id: user.id, last_read_announcements_at: now },
+        { onConflict: 'user_id' },
+      )
+    }
+    void mark()
+  }, [user?.id, massOn, loading])
 
   if (loading) {
     return (
       <View style={[styles.centered, { backgroundColor: colors.background }]}>
         <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    )
+  }
+
+  if (!massOn) {
+    return (
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <Text style={[styles.title, { color: colors.text }]}>Annonces</Text>
+        <Text style={[styles.subtitle, { color: colors.textMuted }]}>
+          Module désactivé dans l’administration.
+        </Text>
       </View>
     )
   }

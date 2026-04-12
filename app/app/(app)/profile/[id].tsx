@@ -12,6 +12,7 @@ import {
 } from 'react-native'
 import { useTheme } from '@/theme/ThemeContext'
 import { useAuth } from '@/contexts/AuthContext'
+import { useAppFeatureFlags } from '@/lib/useAppFeatureFlags'
 import { GENDER_LABELS } from '../../../../lib/constants'
 import { canUnlockContact, canViewFullProfiles, remainingContacts } from '../../../../lib/access'
 import { supabase } from '@/lib/supabase'
@@ -22,6 +23,8 @@ export default function ProfileDetailScreen() {
   const router = useRouter()
   const { colors } = useTheme()
   const { user, profile: myProfile, profileAccess, refreshProfile } = useAuth()
+  const { isOn } = useAppFeatureFlags()
+  const reportOn = isOn('reporting_enabled')
   const params = useLocalSearchParams<{ id?: string }>()
   const [profile, setProfile] = useState<Profile | null>(null)
   const [loading, setLoading] = useState(!!params.id)
@@ -190,7 +193,7 @@ export default function ProfileDetailScreen() {
       <Pressable onPress={() => router.back()} style={styles.back}>
         <Text style={{ color: colors.primary, fontWeight: '600' }}>Retour</Text>
       </Pressable>
-      {canViewTargetFull && profile ? (
+      {canViewTargetFull && profile && reportOn ? (
         <Pressable
           onPress={reportProfile}
           disabled={reporting}

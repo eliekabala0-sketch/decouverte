@@ -1,21 +1,23 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '@lib/supabase'
 import type { Profile } from '@shared/types'
 import { GENDER_LABELS } from '@shared/constants'
+import { PageHeader } from '../components/PageHeader'
 import './DashboardPage.css'
 
 export function ProfilesPage() {
   const [profiles, setProfiles] = useState<Profile[]>([])
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    const load = async () => {
-      const { data } = await supabase.from('profiles').select('*').order('created_at', { ascending: false })
-      setProfiles((data ?? []) as Profile[])
-      setLoading(false)
-    }
-    load()
+  const load = useCallback(async () => {
+    const { data } = await supabase.from('profiles').select('*').order('created_at', { ascending: false })
+    setProfiles((data ?? []) as Profile[])
+    setLoading(false)
   }, [])
+
+  useEffect(() => {
+    void load()
+  }, [load])
 
   const updateStatus = async (id: string, status: 'active' | 'suspended' | 'banned') => {
     await supabase.from('profiles').update({ status }).eq('id', id)
@@ -26,6 +28,7 @@ export function ProfilesPage() {
 
   return (
     <div>
+      <PageHeader onRefresh={load} />
       <h1 className="page-title">Profils</h1>
       <p className="page-subtitle">Voir, modifier, suspendre, bannir ou restaurer les profils.</p>
       <div className="table-wrap">

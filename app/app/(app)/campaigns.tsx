@@ -1,15 +1,44 @@
 import { useEffect, useState } from 'react'
-import { View, Text, StyleSheet, ScrollView, FlatList, Image, ActivityIndicator } from 'react-native'
+import { View, Text, StyleSheet, ScrollView, Image, ActivityIndicator } from 'react-native'
 import { useTheme } from '@/theme/ThemeContext'
+import { useAuth } from '@/contexts/AuthContext'
+import { useAppFeatureFlags } from '@/lib/useAppFeatureFlags'
+import { canViewFullProfiles, remainingContacts } from '../../../lib/access'
 import { supabase } from '@/lib/supabase'
 import type { AdCampaign } from '../../../lib/types'
+import type { ProfileAccess } from '../../../lib/types'
+
+function campaignMatchesAudience(
+  c: AdCampaign,
+  profile: { gender: string } | null,
+  profileAccess: ProfileAccess | null,
+): boolean {
+  if (c.audience === 'all') return true
+  if (!profile) return false
+  if (c.audience === 'men' && profile.gender === 'M') return true
+  if (c.audience === 'women' && profile.gender === 'F') return true
+  const paying =
+    canViewFullProfiles(profile.gender as 'M' | 'F', profileAccess) || remainingContacts(profileAccess) > 0
+  if (c.audience === 'paying') return paying
+  if (c.audience === 'non_paying') return !paying
+  return true
+}
 
 export default function CampaignsScreen() {
   const { colors } = useTheme()
+  const { profile, profileAccess } = useAuth()
+  const { isOn } = useAppFeatureFlags()
   const [campaigns, setCampaigns] = useState<AdCampaign[]>([])
   const [loading, setLoading] = useState(true)
 
+  const campOn = isOn('ad_campaigns_enabled')
+
   useEffect(() => {
+    if (!campOn) {
+      setCampaigns([])
+      setLoading(false)
+      return
+    }
     const load = async () => {
       const now = new Date().toISOString()
       const { data } = await supabase
@@ -19,17 +48,28 @@ export default function CampaignsScreen() {
         .lte('start_at', now)
         .gte('end_at', now)
         .order('priority', { ascending: false })
-      setCampaigns((data ?? []) as AdCampaign[])
+      const raw = (data ?? []) as AdCampaign[]
+      const filtered = raw.filter((c) => campaignMatchesAudience(c, profile ?? null, profileAccess ?? null))
+      setCampaigns(filtered)
       setLoading(false)
     }
-    load()
-  }, [])
+    void load()
+  }, [campOn, profile?.id, profile?.gender, profileAccess?.user_id])
 
   if (loading) {
     return (
       <View style={[styles.centered, { backgroundColor: colors.background }]}>
         <ActivityIndicator size="large" color={colors.primary} />
       </View>
+    )
+  }
+
+  if (!campOn) {
+    return (
+      <ScrollView style={[styles.container, { backgroundColor: colors.background }]} contentContainerStyle={styles.content}>
+        <Text style={[styles.title, { color: colors.text }]}>Campagnes</Text>
+        <Text style={[styles.subtitle, { color: colors.textMuted }]}>Module désactivé dans l’administration.</Text>
+      </ScrollView>
     )
   }
 

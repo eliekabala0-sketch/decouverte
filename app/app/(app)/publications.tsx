@@ -1,15 +1,24 @@
 import { useEffect, useState } from 'react'
 import { View, Text, StyleSheet, FlatList, ActivityIndicator, Pressable, Linking, Image } from 'react-native'
 import { useTheme } from '@/theme/ThemeContext'
+import { useAppFeatureFlags } from '@/lib/useAppFeatureFlags'
 import { supabase } from '@/lib/supabase'
 import type { PublicPublication } from '../../../lib/types'
 
 export default function PublicationsScreen() {
   const { colors } = useTheme()
+  const { isOn } = useAppFeatureFlags()
   const [publications, setPublications] = useState<PublicPublication[]>([])
   const [loading, setLoading] = useState(true)
 
+  const pubsOn = isOn('public_publications_enabled')
+
   useEffect(() => {
+    if (!pubsOn) {
+      setPublications([])
+      setLoading(false)
+      return
+    }
     const load = async () => {
       const { data } = await supabase
         .from('public_publications')
@@ -20,13 +29,22 @@ export default function PublicationsScreen() {
       setPublications((data ?? []) as PublicPublication[])
       setLoading(false)
     }
-    load()
-  }, [])
+    void load()
+  }, [pubsOn])
 
   if (loading) {
     return (
       <View style={[styles.centered, { backgroundColor: colors.background }]}>
         <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    )
+  }
+
+  if (!pubsOn) {
+    return (
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <Text style={[styles.title, { color: colors.text }]}>Publications</Text>
+        <Text style={[styles.subtitle, { color: colors.textMuted }]}>Module désactivé dans l’administration.</Text>
       </View>
     )
   }

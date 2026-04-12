@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '@lib/supabase'
 import type { AdCampaign } from '@shared/types'
 import { MediaUpload } from '../components/MediaUpload'
+import { PageHeader } from '../components/PageHeader'
 import './DashboardPage.css'
 import { FeatureGate } from '../components/FeatureGate'
 
@@ -33,14 +34,15 @@ export function CampaignsPage() {
   const [submitMessage, setSubmitMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [form, setForm] = useState<CampaignForm>(emptyForm)
 
-  useEffect(() => {
-    const load = async () => {
-      const { data } = await supabase.from('ad_campaigns').select('*').order('priority', { ascending: false })
-      setCampaigns((data ?? []) as AdCampaign[])
-      setLoading(false)
-    }
-    load()
+  const load = useCallback(async () => {
+    const { data } = await supabase.from('ad_campaigns').select('*').order('priority', { ascending: false })
+    setCampaigns((data ?? []) as AdCampaign[])
+    setLoading(false)
   }, [])
+
+  useEffect(() => {
+    void load()
+  }, [load])
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -74,8 +76,12 @@ export function CampaignsPage() {
   return (
     <FeatureGate feature="ad_campaigns_enabled">
       <div>
+        <PageHeader onRefresh={load} />
         <h1 className="page-title">Campagnes publicitaires</h1>
-        <p className="page-subtitle">Créer des campagnes (image, texte, durée, audience, priorité). Affichées en haut selon la config.</p>
+        <p className="page-subtitle">
+          Stockées dans <code>ad_campaigns</code>. L’app n’affiche que les lignes <strong>actives</strong>, avec{' '}
+          <code>start_at ≤ maintenant ≤ end_at</code> (UTC). Dates saisies = fuseau du navigateur.
+        </p>
         {submitMessage && (
           <div className={`dashboard-message ${submitMessage.type === 'error' ? 'dashboard-message-error' : 'dashboard-message-success'}`} role="alert">
             {submitMessage.text}

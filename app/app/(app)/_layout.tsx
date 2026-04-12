@@ -1,15 +1,19 @@
 import { Redirect, Tabs } from 'expo-router'
 import { useTheme } from '@/theme/ThemeContext'
 import { useAuth } from '@/contexts/AuthContext'
+import { useAppFeatureFlags } from '@/lib/useAppFeatureFlags'
 import { Ionicons } from '@expo/vector-icons'
 
 export default function AppLayout() {
   const { colors } = useTheme()
   const { user, profile, loading } = useAuth()
+  const { isOn } = useAppFeatureFlags()
 
   if (!loading && !user) return <Redirect href="/(auth)/welcome" />
   if (!loading && user && !profile) return <Redirect href="/(auth)/create-profile" />
   if (!loading && user && profile && !profile.photo) return <Redirect href="/(auth)/add-avatar" />
+
+  const showPublications = isOn('public_publications_enabled')
 
   return (
     <Tabs
@@ -49,6 +53,7 @@ export default function AppLayout() {
         name="publications"
         options={{
           title: 'Publications',
+          href: showPublications ? undefined : null,
           tabBarIcon: ({ color, size }) => <Ionicons name="newspaper" size={size} color={color} />,
         }}
       />

@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '@lib/supabase'
+import { PageHeader } from '../components/PageHeader'
 import './DashboardPage.css'
 
 type AdminUserRow = {
@@ -15,31 +16,31 @@ export function UsersPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    const load = async () => {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .order('created_at', { ascending: false })
-      if (error) {
-        setError(error.message)
-        setUsers([])
-      } else {
-        setUsers((data ?? []) as AdminUserRow[])
-        setError(null)
-      }
-      setLoading(false)
+  const load = useCallback(async () => {
+    setLoading(true)
+    const { data, error } = await supabase.from('profiles').select('*').order('created_at', { ascending: false })
+    if (error) {
+      setError(error.message)
+      setUsers([])
+    } else {
+      setUsers((data ?? []) as AdminUserRow[])
+      setError(null)
     }
-    load().catch((e) => {
+    setLoading(false)
+  }, [])
+
+  useEffect(() => {
+    void load().catch((e) => {
       setError(e instanceof Error ? e.message : 'Erreur de chargement des utilisateurs.')
       setLoading(false)
     })
-  }, [])
+  }, [load])
 
   if (loading) return <div className="page-loading">Chargement...</div>
 
   return (
     <div>
+      <PageHeader onRefresh={load} />
       <h1 className="page-title">Utilisateurs</h1>
       <p className="page-subtitle">
         Comptes disposant d&apos;un profil. Cliquez pour ouvrir profil, activité ou conversations.
@@ -68,9 +69,17 @@ export function UsersPage() {
                   <button
                     type="button"
                     className="secondary"
-                    onClick={() => navigate(`/profiles?user_id=${encodeURIComponent(u.id)}`)}
+                    onClick={() => navigate(`/users/${encodeURIComponent(u.id)}`)}
                   >
-                    Profil
+                    Fiche complète
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => navigate(`/profiles?user_id=${encodeURIComponent(u.id)}`)}
+                    style={{ marginLeft: 8 }}
+                  >
+                    Profil (liste)
                   </button>
                   <button
                     type="button"

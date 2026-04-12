@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '@lib/supabase'
 import { useAdminAuth } from '../contexts/AdminAuthContext'
 import type { PublicPublication, PublicationContentType } from '@shared/types'
 import { MediaUpload } from '../components/MediaUpload'
+import { PageHeader } from '../components/PageHeader'
 import './DashboardPage.css'
 import { FeatureGate } from '../components/FeatureGate'
 
@@ -27,14 +28,15 @@ export function PublicationsPage() {
     is_active: true,
   })
 
-  useEffect(() => {
-    const load = async () => {
-      const { data } = await supabase.from('public_publications').select('*').order('created_at', { ascending: false })
-      setPublications((data ?? []) as PublicPublication[])
-      setLoading(false)
-    }
-    load()
+  const load = useCallback(async () => {
+    const { data } = await supabase.from('public_publications').select('*').order('created_at', { ascending: false })
+    setPublications((data ?? []) as PublicPublication[])
+    setLoading(false)
   }, [])
+
+  useEffect(() => {
+    void load()
+  }, [load])
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -72,8 +74,11 @@ export function PublicationsPage() {
   return (
     <FeatureGate feature="public_publications_enabled">
       <div>
+        <PageHeader onRefresh={load} />
         <h1 className="page-title">Publications publiques</h1>
-        <p className="page-subtitle">Seul l'admin peut publier pour l'instant. Les publications sont mises en premier (épinglées) pour tous.</p>
+        <p className="page-subtitle">
+          Insérées dans <code>public_publications</code> (RLS : compte avec <code>profiles.role = admin</code>). Visibles dans l’app onglet Publications si actif dans les paramètres.
+        </p>
         {submitMessage && (
           <div className={`dashboard-message ${submitMessage.type === 'error' ? 'dashboard-message-error' : 'dashboard-message-success'}`} role="alert">
             {submitMessage.text}

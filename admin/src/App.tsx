@@ -13,12 +13,14 @@ import { SettingsPage } from './pages/SettingsPage'
 import { PublicationsPage } from './pages/PublicationsPage'
 import { CampaignsPage } from './pages/CampaignsPage'
 import { MassMessagesPage } from './pages/MassMessagesPage'
+import { UserDetailPage } from './pages/UserDetailPage'
 import { useAdminAuth } from './contexts/AdminAuthContext'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, loading } = useAdminAuth()
+  const { isAuthenticated, isAdmin, loading } = useAdminAuth()
   if (loading) return <div className="fullscreen center">Chargement...</div>
   if (!isAuthenticated) return <Navigate to="/login" replace />
+  if (!isAdmin) return <Navigate to="/login" replace />
   return <>{children}</>
 }
 
@@ -34,6 +36,7 @@ export default function App() {
               <Routes>
                 <Route path="/" element={<DashboardHome />} />
                 <Route path="users" element={<UsersPage />} />
+                <Route path="users/:userId" element={<UserDetailPage />} />
                 <Route path="profiles" element={<ProfilesPage />} />
                 <Route path="conversations" element={<ConversationsPage />} />
                 <Route path="reports" element={<ReportsPage />} />

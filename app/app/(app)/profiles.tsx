@@ -34,6 +34,20 @@ export default function ProfilesScreen() {
         const reciprocal = Boolean((setting as { value?: boolean } | null)?.value)
         setReciprocalEnabled(reciprocal)
 
+        const { data: ml } = await supabase.from('admin_settings').select('value').eq('key', 'mode_libre_enabled').maybeSingle()
+        const { data: ms } = await supabase.from('admin_settings').select('value').eq('key', 'mode_serieux_enabled').maybeSingle()
+        const libreOn = typeof (ml as { value?: boolean } | null)?.value === 'boolean' ? (ml as { value: boolean }).value : true
+        const serieuxOn = typeof (ms as { value?: boolean } | null)?.value === 'boolean' ? (ms as { value: boolean }).value : true
+        const isSerieux = mode === 'serieux'
+        if (isSerieux && !serieuxOn) {
+          setProfiles([])
+          return
+        }
+        if (!isSerieux && !libreOn) {
+          setProfiles([])
+          return
+        }
+
         const { data, error } = await supabase
           .from('profiles')
           .select(
@@ -76,7 +90,7 @@ export default function ProfilesScreen() {
       }
     }
     load()
-  }, [myProfile?.id, myProfile?.gender, refreshKey])
+  }, [myProfile?.id, myProfile?.gender, refreshKey, mode])
 
   const canViewFull = canViewFullProfiles(myProfile?.gender, profileAccess)
   const onPressProfile = (id: string) => router.push(`/(app)/profile/${id}`)
