@@ -9,6 +9,8 @@ import './DashboardPage.css'
 
 type PhotoRow = { id: string; photo_url: string; is_primary: boolean }
 
+type ProfileEditableFields = Pick<Profile, 'boost_reason' | 'mode_libre_active' | 'mode_serieux_active'>
+
 const fnSetPassword = () => {
   const base = import.meta.env.VITE_SUPABASE_URL?.replace(/\/$/, '') ?? ''
   return `${base}/functions/v1/admin-set-password`
@@ -94,7 +96,7 @@ export function UserDetailPage() {
     void load()
   }
 
-  const saveProfilePatch = async (patch: Partial<Profile>) => {
+  const saveProfilePatch = async (patch: Partial<ProfileEditableFields>) => {
     if (!userId) return
     setMsg(null)
     const { error } = await supabase.from('profiles').update(patch).eq('id', userId)

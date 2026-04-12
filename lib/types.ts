@@ -32,6 +32,10 @@ export interface Profile {
   is_verified: boolean
   username: string
   age: number
+  /** Colonne `profiles.mode_libre_active` (filtre Mode Libre). */
+  mode_libre_active?: boolean
+  /** Colonne `profiles.mode_serieux_active` (filtre Mode Sérieux). */
+  mode_serieux_active?: boolean
   boost_reason: string | null
   country: string | null
   role: string | null
