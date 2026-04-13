@@ -7,10 +7,13 @@ import { useAppFeatureFlags } from '@/lib/useAppFeatureFlags'
 import { supabase } from '@/lib/supabase'
 import type { ContactPack } from '../../../lib/types'
 import { remainingContacts } from '../../../lib/access'
-import { PAYMENT_PROVIDER_BADIBOSS } from '../../../lib/constants'
 
 function formatPriceUsd(priceCents: number, currency?: string) {
   return `${(priceCents / 100).toFixed(2)} ${currency || 'USD'}`
+}
+
+function makeTransactionRef(prefix: string) {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
 export default function PacksScreen() {
@@ -52,12 +55,13 @@ export default function PacksScreen() {
       setBuyingId(pack.id)
       const { error: payErr } = await supabase.from('payments').insert({
         user_id: user.id,
-        type: 'contact_pack',
-        provider: PAYMENT_PROVIDER_BADIBOSS,
-        amount_cents: pack.price_cents,
+        amount: Number((pack.price_cents / 100).toFixed(2)),
         currency: pack.currency,
+        payment_method: 'Badiboss Pay',
+        payment_provider: 'Badiboss Pay',
+        provider: 'contact_pack',
+        transaction_ref: makeTransactionRef('pack'),
         status: 'completed',
-        metadata: { pack_id: pack.id, pack_name: pack.name, quota: addContacts },
       })
       if (payErr) throw new Error(payErr.message || payErr.code || 'Échec enregistrement paiement')
 

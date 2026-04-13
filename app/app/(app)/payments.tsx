@@ -8,16 +8,18 @@ import { canViewFullProfiles, remainingContacts } from '../../../lib/access'
 import { supabase } from '@/lib/supabase'
 import {
   GENDER_REQUIRES_PROFILES_ACCESS_PAYMENT,
-  PAYMENT_METADATA_KIND_VISIBILITY_BOOST,
-  PAYMENT_PROVIDER_BADIBOSS,
-  PROFILES_ACCESS_DAYS,
+  PAYMENT_PROVIDER_VISIBILITY_BOOST,
   VISIBILITY_BOOST_TIERS,
 } from '../../../lib/constants'
 import { extendBoostedUntil, formatBoostStatusLabel } from '../../../lib/boostVisibility'
 import type { Profile } from '../../../lib/types'
 
-function formatUsd(cents: number) {
-  return `${(cents / 100).toFixed(2)} USD`
+function formatUsd(amount: number) {
+  return `${amount.toFixed(2)} USD`
+}
+
+function makeTransactionRef(prefix: string) {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
 export default function PaymentsScreen() {
@@ -54,8 +56,9 @@ export default function PaymentsScreen() {
         .from('payments')
         .select('id')
         .eq('user_id', user.id)
+        .eq('provider', PAYMENT_PROVIDER_VISIBILITY_BOOST)
+        .eq('payment_provider', 'Badiboss Pay')
         .eq('status', 'pending')
-        .contains('metadata', { payment_kind: PAYMENT_METADATA_KIND_VISIBILITY_BOOST })
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle()
@@ -69,15 +72,15 @@ export default function PaymentsScreen() {
   const buyProfilesAccess = async () => {
     if (!user?.id || !profile) return
     try {
-      const until = new Date(Date.now() + PROFILES_ACCESS_DAYS * 24 * 60 * 60 * 1000).toISOString()
       const { error: payErr } = await supabase.from('payments').insert({
         user_id: user.id,
-        type: 'profiles_access',
-        provider: PAYMENT_PROVIDER_BADIBOSS,
-        amount_cents: 0,
+        amount: 0,
         currency: 'USD',
+        payment_method: 'Badiboss Pay',
+        payment_provider: 'Badiboss Pay',
+        provider: 'profiles_access',
+        transaction_ref: makeTransactionRef('profiles'),
         status: 'completed',
-        metadata: { days: PROFILES_ACCESS_DAYS, until },
       })
       if (payErr) throw new Error(payErr.message || payErr.code || 'Échec enregistrement paiement')
 
@@ -114,16 +117,13 @@ export default function PaymentsScreen() {
         .from('payments')
         .insert({
           user_id: user.id,
-          provider: PAYMENT_PROVIDER_BADIBOSS,
-          amount_cents: tier.amount_cents,
+          amount: tier.amount,
           currency: 'USD',
+          payment_method: 'Badiboss Pay',
+          payment_provider: 'Badiboss Pay',
+          provider: PAYMENT_PROVIDER_VISIBILITY_BOOST,
+          transaction_ref: makeTransactionRef('boost'),
           status: 'pending',
-          metadata: {
-            payment_kind: PAYMENT_METADATA_KIND_VISIBILITY_BOOST,
-            duration_days: tier.days,
-            profile_id: profile.id,
-            tier_label: tier.label,
-          },
         })
         .select('id')
         .single()
@@ -132,7 +132,7 @@ export default function PaymentsScreen() {
       setBoostPendingId(id)
       Alert.alert(
         'Commande créée',
-        `Montant : ${formatUsd(tier.amount_cents)}. Après paiement sur Badiboss Pay, appuyez sur « Confirmer le paiement ».`
+        `Montant : ${formatUsd(tier.amount)}. Après paiement sur Badiboss Pay, appuyez sur « Confirmer le paiement ».`
       )
     } catch (e: unknown) {
       Alert.alert('Boost', e instanceof Error ? e.message : 'Impossible de créer la commande.')
@@ -147,22 +147,23 @@ export default function PaymentsScreen() {
     try {
       const { data: pay, error: selErr } = await supabase
         .from('payments')
-        .select('id,status,metadata')
+        .select('id,status,provider,payment_provider')
         .eq('id', boostPendingId)
         .eq('user_id', user.id)
         .maybeSingle()
       if (selErr) throw new Error(selErr.message || 'Lecture paiement impossible')
       const row = pay as {
         status?: string
-        metadata?: { payment_kind?: string; duration_days?: number }
+        provider?: string | null
+        payment_provider?: string | null
       } | null
       if (!row || row.status !== 'pending') {
         throw new Error('Aucune commande boost en attente pour ce compte.')
       }
-      if (row.metadata?.payment_kind !== PAYMENT_METADATA_KIND_VISIBILITY_BOOST) {
+      if (row.provider !== PAYMENT_PROVIDER_VISIBILITY_BOOST || row.payment_provider !== 'Badiboss Pay') {
         throw new Error('Cette commande n’est pas une mise en avant valide.')
       }
-      const days = Number(row.metadata?.duration_days) || VISIBILITY_BOOST_TIERS[0].days
+      const days = VISIBILITY_BOOST_TIERS[boostTierIdx]?.days ?? VISIBILITY_BOOST_TIERS[0].days
 
       const { error: upPay } = await supabase
         .from('payments')
@@ -230,12 +231,12 @@ export default function PaymentsScreen() {
               ]}
             >
               <Text style={{ color: c.text, fontWeight: '600', fontSize: 13 }}>{t.label}</Text>
-              <Text style={{ color: c.textSecondary, fontSize: 12 }}>{formatUsd(t.amount_cents)}</Text>
+              <Text style={{ color: c.textSecondary, fontSize: 12 }}>{formatUsd(t.amount)}</Text>
             </Pressable>
           ))}
         </View>
         <Text style={[styles.priceLine, { color: c.text }]}>
-          Total à payer : {formatUsd(tier.amount_cents)} — {tier.label}
+          Total à payer : {formatUsd(tier.amount)} — {tier.label}
         </Text>
 
         {boostPendingId ? (
