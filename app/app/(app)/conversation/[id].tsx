@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import {
   View,
   Text,
@@ -26,7 +26,19 @@ export default function ConversationScreen() {
   const [sending, setSending] = useState(false)
   const [input, setInput] = useState('')
   const [otherName, setOtherName] = useState<string>('')
+  const [accessDenied, setAccessDenied] = useState(false)
+  const [sendError, setSendError] = useState<string | null>(null)
   const flatListRef = useRef<FlatList>(null)
+
+  const markConversationAsRead = useCallback(async () => {
+    if (!id || !user?.id) return
+    await supabase
+      .from('messages')
+      .update({ read_at: new Date().toISOString() })
+      .eq('conversation_id', id)
+      .neq('sender_id', user.id)
+      .is('read_at', null)
+  }, [id, user?.id])
 
   useEffect(() => {
     if (!id || !user?.id) {
@@ -36,7 +48,13 @@ export default function ConversationScreen() {
     const load = async () => {
       const { data: conv } = await supabase.from('conversations').select('participant_ids').eq('id', id).single()
       if (conv && Array.isArray((conv as { participant_ids: string[] }).participant_ids)) {
-        const otherId = (conv as { participant_ids: string[] }).participant_ids.find((uid) => uid !== user.id)
+        const ids = (conv as { participant_ids: string[] }).participant_ids
+        if (!ids.includes(user.id)) {
+          setAccessDenied(true)
+          setLoading(false)
+          return
+        }
+        const otherId = ids.find((uid) => uid !== user.id)
         if (otherId) {
           const { data: profileData } = await supabase
             .from('profiles')
@@ -52,9 +70,10 @@ export default function ConversationScreen() {
         .eq('conversation_id', id)
         .order('created_at', { ascending: true })
       setMessages((data ?? []) as Message[])
+      await markConversationAsRead()
       setLoading(false)
     }
-    load()
+    void load()
 
     const channel = supabase
       .channel(`messages:${id}`)
@@ -62,19 +81,25 @@ export default function ConversationScreen() {
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${id}` },
         (payload) => {
-          setMessages((prev) => [...prev, payload.new as Message])
+          setMessages((prev) => {
+            const next = payload.new as Message
+            if (prev.some((m) => m.id === next.id)) return prev
+            return [...prev, next]
+          })
+          void markConversationAsRead()
         }
       )
       .subscribe()
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [id, user?.id])
+  }, [id, user?.id, markConversationAsRead])
 
   const send = async () => {
     const text = input.trim()
-    if (!text || !user?.id || !id || sending) return
+    if (!text || !user?.id || !id || sending || accessDenied) return
     setSending(true)
+    setSendError(null)
     setInput('')
     try {
       const { data: msg, error } = await supabase
@@ -87,13 +112,18 @@ export default function ConversationScreen() {
         .select()
         .single()
       if (error) throw error
-      setMessages((prev) => [...prev, msg as Message])
+      setMessages((prev) => {
+        const next = msg as Message
+        if (prev.some((m) => m.id === next.id)) return prev
+        return [...prev, next]
+      })
       await supabase
         .from('conversations')
         .update({ last_message_at: new Date().toISOString() })
         .eq('id', id)
       flatListRef.current?.scrollToEnd({ animated: true })
-    } catch (_e) {
+    } catch (e) {
+      setSendError(e instanceof Error ? e.message : 'Envoi impossible.')
       setInput(text)
     } finally {
       setSending(false)
@@ -104,6 +134,17 @@ export default function ConversationScreen() {
     return (
       <View style={[styles.centered, { backgroundColor: colors.background }]}>
         <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    )
+  }
+
+  if (accessDenied) {
+    return (
+      <View style={[styles.centered, { backgroundColor: colors.background }]}>
+        <Text style={{ color: colors.textSecondary }}>Accès refusé à cette conversation.</Text>
+        <Pressable onPress={() => router.back()} style={{ marginTop: 12 }}>
+          <Text style={{ color: colors.primary, fontWeight: '600' }}>Retour</Text>
+        </Pressable>
       </View>
     )
   }
@@ -148,6 +189,9 @@ export default function ConversationScreen() {
           <Text style={[styles.empty, { color: colors.textMuted }]}>Aucun message. Envoyez le premier.</Text>
         }
       />
+      {sendError ? (
+        <Text style={{ color: colors.error, paddingHorizontal: 16, paddingBottom: 6 }}>{sendError}</Text>
+      ) : null}
       <View style={[styles.footer, { backgroundColor: colors.surface, borderTopColor: colors.border }]}>
         <TextInput
           style={[styles.input, { backgroundColor: colors.background, color: colors.text, borderColor: colors.border }]}

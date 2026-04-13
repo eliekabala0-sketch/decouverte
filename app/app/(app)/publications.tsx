@@ -1,36 +1,92 @@
-import { useEffect, useState } from 'react'
-import { View, Text, StyleSheet, FlatList, ActivityIndicator, Pressable, Linking, Image } from 'react-native'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { View, Text, StyleSheet, FlatList, ActivityIndicator, Pressable, Linking, Image, RefreshControl } from 'react-native'
 import { useTheme } from '@/theme/ThemeContext'
 import { useAppFeatureFlags } from '@/lib/useAppFeatureFlags'
 import { supabase } from '@/lib/supabase'
+import { useAuth } from '@/contexts/AuthContext'
 import type { PublicPublication } from '../../../lib/types'
 
 export default function PublicationsScreen() {
   const { colors } = useTheme()
   const { isOn } = useAppFeatureFlags()
+  const { user } = useAuth()
   const [publications, setPublications] = useState<PublicPublication[]>([])
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [ratios, setRatios] = useState<Record<string, number>>({})
 
   const pubsOn = isOn('public_publications_enabled')
 
-  useEffect(() => {
+  const load = useCallback(async () => {
     if (!pubsOn) {
       setPublications([])
       setLoading(false)
       return
     }
-    const load = async () => {
-      const { data } = await supabase
+    try {
+      setLoadError(null)
+      const { data, error } = await supabase
         .from('public_publications')
         .select('*')
         .eq('is_active', true)
         .order('is_pinned', { ascending: false })
         .order('created_at', { ascending: false })
+      if (error) throw error
       setPublications((data ?? []) as PublicPublication[])
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : 'Erreur de chargement des publications.')
+    } finally {
       setLoading(false)
+      setRefreshing(false)
     }
-    void load()
   }, [pubsOn])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  useEffect(() => {
+    const images = publications.filter((p) => p.content_type === 'image' && p.image_url)
+    images.forEach((p) => {
+      if (!p.image_url || ratios[p.id]) return
+      Image.getSize(
+        p.image_url,
+        (w, h) => {
+          if (w > 0 && h > 0) {
+            setRatios((prev) => ({ ...prev, [p.id]: Math.max(0.6, Math.min(1.6, w / h)) }))
+          }
+        },
+        () => setRatios((prev) => ({ ...prev, [p.id]: 1 }))
+      )
+    })
+  }, [publications, ratios])
+
+  useEffect(() => {
+    if (!user?.id || !pubsOn) return
+    if (publications.length === 0) return
+    const latest = publications[0]?.created_at
+    if (!latest) return
+    void supabase
+      .from('user_publication_read_state')
+      .upsert(
+        { user_id: user.id, last_read_publications_at: latest },
+        { onConflict: 'user_id' }
+      )
+      .then(({ error }) => {
+        if (error) console.warn('[publications] read_state upsert', error.message)
+      })
+  }, [user?.id, pubsOn, publications])
+
+  const onRefresh = () => {
+    setRefreshing(true)
+    void load()
+  }
+
+  const headerSubtitle = useMemo(
+    () => 'Publications publiques — épinglées en premier',
+    []
+  )
 
   if (loading) {
     return (
@@ -53,12 +109,16 @@ export default function PublicationsScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <Text style={[styles.title, { color: colors.text }]}>Publications</Text>
       <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-        Publications publiques — épinglées en premier
+        {headerSubtitle}
       </Text>
+      {loadError ? (
+        <Text style={[styles.error, { color: colors.error }]}>{loadError}</Text>
+      ) : null}
       <FlatList
         data={publications}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
         renderItem={({ item }) => (
           <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
             {item.is_pinned && (
@@ -69,7 +129,13 @@ export default function PublicationsScreen() {
             <Text style={[styles.cardTitle, { color: colors.text }]}>{item.title}</Text>
             <Text style={[styles.cardContent, { color: colors.textSecondary }]}>{item.content}</Text>
             {item.content_type === 'image' && item.image_url ? (
-              <Image source={{ uri: item.image_url }} style={styles.media} resizeMode="cover" />
+              <View style={[styles.mediaWrap, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+                <Image
+                  source={{ uri: item.image_url }}
+                  style={[styles.media, { aspectRatio: ratios[item.id] ?? 1 }]}
+                  resizeMode="contain"
+                />
+              </View>
             ) : null}
             {item.content_type === 'video' && item.video_url ? (
               <Pressable
@@ -116,7 +182,14 @@ const styles = StyleSheet.create({
   pinText: { color: '#fff', fontSize: 11, fontWeight: '600' },
   cardTitle: { fontSize: 18, fontWeight: '700', marginBottom: 8 },
   cardContent: { fontSize: 15, lineHeight: 22, marginBottom: 12 },
-  media: { width: '100%', height: 200, borderRadius: 12, marginBottom: 12 },
+  mediaWrap: {
+    width: '100%',
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 12,
+    overflow: 'hidden',
+  },
+  media: { width: '100%', maxHeight: 420 },
   videoLink: {
     padding: 12,
     borderRadius: 12,
@@ -127,4 +200,5 @@ const styles = StyleSheet.create({
   videoLinkText: { fontSize: 15, fontWeight: '600' },
   cardDate: { fontSize: 13 },
   empty: { textAlign: 'center', marginTop: 48 },
+  error: { marginBottom: 10 },
 })

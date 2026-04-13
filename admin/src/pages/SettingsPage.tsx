@@ -58,6 +58,8 @@ const HELP: Record<string, string> = {
 export function SettingsPage() {
   const [settings, setSettings] = useState<Setting[]>([])
   const [loading, setLoading] = useState(true)
+  const [boostOffersText, setBoostOffersText] = useState('[]')
+  const [savingOffers, setSavingOffers] = useState(false)
 
   const load = useCallback(async () => {
     const { data } = await supabase.from('admin_settings').select('*')
@@ -68,6 +70,12 @@ export function SettingsPage() {
   useEffect(() => {
     void load()
   }, [load])
+
+  useEffect(() => {
+    const current = settings.find((s) => s.key === 'visibility_boost_offers')
+    if (!current) return
+    setBoostOffersText(JSON.stringify(current.value ?? [], null, 2))
+  }, [settings])
 
   const { wired, other } = useMemo(() => {
     const w: Setting[] = []
@@ -81,6 +89,48 @@ export function SettingsPage() {
   const toggle = async (key: string, value: boolean) => {
     await supabase.from('admin_settings').update({ value, updated_at: new Date().toISOString() }).eq('key', key)
     setSettings((prev) => prev.map((s) => (s.key === key ? { ...s, value } : s)))
+  }
+
+  const saveBoostOffers = async () => {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(boostOffersText || '[]')
+    } catch {
+      alert('JSON invalide pour les offres boost.')
+      return
+    }
+    if (!Array.isArray(parsed)) {
+      alert('Le JSON doit être un tableau.')
+      return
+    }
+    const normalized = parsed
+      .map((x) => {
+        const rec = x as { days?: unknown; amount?: unknown; label?: unknown }
+        const days = Number(rec.days)
+        const amount = Number(rec.amount)
+        const label = typeof rec.label === 'string' ? rec.label.trim() : `${days} jours`
+        if (!Number.isFinite(days) || days <= 0) return null
+        if (!Number.isFinite(amount) || amount < 0) return null
+        return { days, amount, label }
+      })
+      .filter(Boolean)
+    if (normalized.length === 0) {
+      alert('Aucune offre valide.')
+      return
+    }
+    setSavingOffers(true)
+    const { error } = await supabase
+      .from('admin_settings')
+      .upsert(
+        { key: 'visibility_boost_offers', value: normalized, updated_at: new Date().toISOString() },
+        { onConflict: 'key' }
+      )
+    setSavingOffers(false)
+    if (error) {
+      alert(`Erreur enregistrement offres boost: ${error.message}`)
+      return
+    }
+    await load()
   }
 
   if (loading) return <div className="page-loading">Chargement...</div>
@@ -126,6 +176,23 @@ export function SettingsPage() {
         Autres clés (base seulement)
       </h2>
       <ul className="toggle-list">{other.map(renderRow)}</ul>
+
+      <section className="dashboard-section" style={{ marginTop: 28 }}>
+        <h2>Offres boost (effet immédiat côté app)</h2>
+        <p className="text-secondary" style={{ marginTop: 6 }}>
+          JSON tableau: {`[{ "days": 7, "amount": 9.99, "label": "7 jours" }]`}
+        </p>
+        <textarea
+          style={{ width: '100%', minHeight: 160, marginTop: 10 }}
+          value={boostOffersText}
+          onChange={(e) => setBoostOffersText(e.target.value)}
+        />
+        <div className="form-actions">
+          <button type="button" onClick={() => void saveBoostOffers()} disabled={savingOffers}>
+            {savingOffers ? 'Enregistrement…' : 'Enregistrer les offres boost'}
+          </button>
+        </div>
+      </section>
     </div>
   )
 }

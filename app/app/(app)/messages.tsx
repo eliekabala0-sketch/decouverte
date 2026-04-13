@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { View, Text, StyleSheet, FlatList, Pressable, ActivityIndicator } from 'react-native'
+import { useCallback, useEffect, useState } from 'react'
+import { View, Text, StyleSheet, FlatList, Pressable, ActivityIndicator, RefreshControl } from 'react-native'
 import { useRouter } from 'expo-router'
 import { useTheme } from '@/theme/ThemeContext'
 import { useAuth } from '@/contexts/AuthContext'
@@ -7,7 +7,12 @@ import { supabase } from '@/lib/supabase'
 import type { Conversation } from '../../../lib/types'
 import { remainingContacts } from '../../../lib/access'
 
-type ConversationWithOther = Conversation & { otherUserId: string; otherDisplayName: string; lastContent?: string }
+type ConversationWithOther = Conversation & {
+  otherUserId: string
+  otherDisplayName: string
+  lastContent?: string
+  unreadCount: number
+}
 
 export default function MessagesScreen() {
   const router = useRouter()
@@ -20,53 +25,89 @@ export default function MessagesScreen() {
 
   const contactsLeft = remainingContacts(profileAccess)
 
-  useEffect(() => {
+  const loadConversations = useCallback(async () => {
     if (!user?.id) {
       setLoading(false)
       return
     }
     setLoadError(null)
-    const load = async () => {
-      try {
-        const { data: convData, error: convError } = await supabase
-          .from('conversations')
-          .select('*')
-          .contains('participant_ids', [user.id])
-          .order('last_message_at', { ascending: false })
-        if (convError) throw convError
-        const convs = (convData ?? []) as Conversation[]
-        const withOther: ConversationWithOther[] = []
-        for (const c of convs) {
-          const otherId = c.participant_ids?.find((id) => id !== user.id)
-          if (!otherId) continue
-          const { data: profileData } = await supabase
-            .from('profiles')
-            .select('username')
-            .eq('id', otherId)
-            .maybeSingle()
-          const { data: lastMsg } = await supabase
+    try {
+      const { data: convData, error: convError } = await supabase
+        .from('conversations')
+        .select('*')
+        .contains('participant_ids', [user.id])
+        .order('last_message_at', { ascending: false })
+      if (convError) throw convError
+      const convs = (convData ?? []) as Conversation[]
+      const ids = convs.map((c) => c.id)
+      const others = convs
+        .map((c) => c.participant_ids?.find((id) => id !== user.id))
+        .filter(Boolean) as string[]
+
+      const { data: profData } = others.length
+        ? await supabase.from('profiles').select('id,username').in('id', others)
+        : { data: [] as unknown[] }
+      const profileMap = new Map<string, string>()
+      ;((profData ?? []) as { id: string; username: string }[]).forEach((p) => profileMap.set(p.id, p.username))
+
+      const { data: msgData } = ids.length
+        ? await supabase
             .from('messages')
-            .select('content')
-            .eq('conversation_id', c.id)
+            .select('id,conversation_id,content,created_at,sender_id,read_at')
+            .in('conversation_id', ids)
             .order('created_at', { ascending: false })
-            .limit(1)
-            .maybeSingle()
-          withOther.push({
+        : { data: [] as unknown[] }
+
+      const grouped = new Map<string, { last?: string; unread: number }>()
+      ;((msgData ?? []) as { conversation_id: string; content: string; sender_id: string; read_at?: string | null }[]).forEach((m) => {
+        const g = grouped.get(m.conversation_id) ?? { unread: 0 }
+        if (g.last === undefined) g.last = m.content
+        if (m.sender_id !== user.id && !m.read_at) g.unread += 1
+        grouped.set(m.conversation_id, g)
+      })
+
+      const withOther: ConversationWithOther[] = convs
+        .map((c) => {
+          const otherId = c.participant_ids?.find((id) => id !== user.id)
+          if (!otherId) return null
+          const g = grouped.get(c.id)
+          return {
             ...c,
             otherUserId: otherId,
-            otherDisplayName: (profileData as { username: string } | null)?.username ?? 'Utilisateur',
-            lastContent: (lastMsg as { content: string } | null)?.content,
-          })
-        }
-        setConversations(withOther)
-      } catch (e: unknown) {
-        setLoadError(e instanceof Error ? e.message : 'Erreur de chargement')
-      } finally {
-        setLoading(false)
-      }
+            otherDisplayName: profileMap.get(otherId) ?? 'Utilisateur',
+            lastContent: g?.last,
+            unreadCount: g?.unread ?? 0,
+          }
+        })
+        .filter(Boolean) as ConversationWithOther[]
+
+      setConversations(withOther)
+    } catch (e: unknown) {
+      setLoadError(e instanceof Error ? e.message : 'Erreur de chargement')
+    } finally {
+      setLoading(false)
     }
-    load()
-  }, [user?.id, refreshKey])
+  }, [user?.id])
+
+  useEffect(() => {
+    void loadConversations()
+    if (!user?.id) return
+    const channel = supabase
+      .channel(`messages-list:${user.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => {
+        void loadConversations()
+      })
+      .subscribe()
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [user?.id, refreshKey, loadConversations])
+
+  const onRefresh = () => {
+    setLoading(true)
+    setLoadError(null)
+    setRefreshKey((k) => k + 1)
+  }
 
   if (loading) {
     return (
@@ -100,6 +141,7 @@ export default function MessagesScreen() {
         data={conversations}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={onRefresh} tintColor={colors.primary} />}
         renderItem={({ item }) => (
           <Pressable
             style={({ pressed }) => [
@@ -113,6 +155,9 @@ export default function MessagesScreen() {
               <Text style={[styles.rowPreview, { color: colors.textSecondary }]} numberOfLines={1}>
                 {item.lastContent ?? 'Aucun message'}
               </Text>
+              {item.unreadCount > 0 ? (
+                <Text style={[styles.unread, { color: colors.primary }]}>{item.unreadCount} nouveau(x)</Text>
+              ) : null}
             </View>
             <Text style={[styles.rowDate, { color: colors.textMuted }]}>
               {new Date(item.last_message_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}
@@ -147,6 +192,7 @@ const styles = StyleSheet.create({
   rowContent: { flex: 1, marginRight: 12 },
   rowName: { fontSize: 17, fontWeight: '600', marginBottom: 4 },
   rowPreview: { fontSize: 14 },
+  unread: { fontSize: 12, marginTop: 4, fontWeight: '700' },
   rowDate: { fontSize: 12 },
   empty: { textAlign: 'center', marginTop: 48, paddingHorizontal: 24 },
   retryBtn: { marginTop: 16, paddingVertical: 12, paddingHorizontal: 24, borderRadius: 12, alignSelf: 'center' },

@@ -81,8 +81,8 @@ export default function ProfilesScreen() {
           return
         }
         if (myProfile.gender === 'F' && !reciprocal) {
-          // Non réciproque par défaut.
-          setProfiles([])
+          // Femme sans réciprocité: aperçu réel de présence (liste visible), mais détails verrouillés.
+          setProfiles(sortBoostThenRecent(filteredSelf.filter((p) => p.gender === 'M')).slice(0, 24))
           return
         }
         if (myProfile.gender === 'F' && reciprocal) {
@@ -129,7 +129,7 @@ export default function ProfilesScreen() {
       </Text>
       {myProfile?.gender === 'F' && !reciprocalEnabled ? (
         <Text style={[styles.subtitle, { color: colors.textMuted }]}>
-          La recherche réciproque est désactivée pour le moment.
+          La recherche réciproque est désactivée : aperçu des profils visible, détails complets et échanges limités.
         </Text>
       ) : null}
       <FlatList

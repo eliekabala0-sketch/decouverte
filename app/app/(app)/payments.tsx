@@ -14,6 +14,8 @@ import {
 import { extendBoostedUntil, formatBoostStatusLabel } from '../../../lib/boostVisibility'
 import type { Profile } from '../../../lib/types'
 
+type BoostTier = { days: number; label: string; amount: number }
+
 function formatUsd(amount: number) {
   return `${amount.toFixed(2)} USD`
 }
@@ -44,6 +46,38 @@ export default function PaymentsScreen() {
   const [boostTierIdx, setBoostTierIdx] = useState(0)
   const [boostPendingId, setBoostPendingId] = useState<string | null>(null)
   const [boostBusy, setBoostBusy] = useState(false)
+  const [boostTiers, setBoostTiers] = useState<BoostTier[]>([...VISIBILITY_BOOST_TIERS])
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const { data } = await supabase
+        .from('admin_settings')
+        .select('value')
+        .eq('key', 'visibility_boost_offers')
+        .maybeSingle()
+      const raw = (data as { value?: unknown } | null)?.value
+      if (!Array.isArray(raw)) return
+      const parsed = raw
+        .map((x) => {
+          const rec = x as { days?: unknown; amount?: unknown; label?: unknown }
+          const days = Number(rec.days)
+          const amount = Number(rec.amount)
+          const label = typeof rec.label === 'string' ? rec.label.trim() : `${days} jours`
+          if (!Number.isFinite(days) || days <= 0) return null
+          if (!Number.isFinite(amount) || amount < 0) return null
+          return { days, amount, label } as BoostTier
+        })
+        .filter(Boolean) as BoostTier[]
+      if (!cancelled && parsed.length > 0) {
+        setBoostTiers(parsed)
+        setBoostTierIdx(0)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     if (!user?.id || !canBuyBoost) {
@@ -110,7 +144,8 @@ export default function PaymentsScreen() {
 
   const createBoostOrder = async () => {
     if (!user?.id || !profile || boostBusy) return
-    const tier = VISIBILITY_BOOST_TIERS[boostTierIdx]
+    const tier = boostTiers[boostTierIdx] ?? boostTiers[0]
+    if (!tier) return
     setBoostBusy(true)
     try {
       const { data, error } = await supabase
@@ -163,7 +198,7 @@ export default function PaymentsScreen() {
       if (row.provider !== PAYMENT_PROVIDER_VISIBILITY_BOOST || row.payment_provider !== 'Badiboss Pay') {
         throw new Error('Cette commande n’est pas une mise en avant valide.')
       }
-      const days = VISIBILITY_BOOST_TIERS[boostTierIdx]?.days ?? VISIBILITY_BOOST_TIERS[0].days
+      const days = boostTiers[boostTierIdx]?.days ?? boostTiers[0]?.days ?? 7
 
       const { error: upPay } = await supabase
         .from('payments')
@@ -200,7 +235,8 @@ export default function PaymentsScreen() {
   const renderBoostBlock = (opts: { prominent?: boolean }) => {
     if (!profile || !canBuyBoost) return null
     const prominent = !!opts.prominent
-    const tier = VISIBILITY_BOOST_TIERS[boostTierIdx]
+    const tier = boostTiers[boostTierIdx] ?? boostTiers[0]
+    if (!tier) return null
     return (
       <View
         style={[
@@ -218,7 +254,7 @@ export default function PaymentsScreen() {
 
         <Text style={[styles.tierLabel, { color: c.text }]}>Durée</Text>
         <View style={styles.tierRow}>
-          {VISIBILITY_BOOST_TIERS.map((t, i) => (
+          {boostTiers.map((t, i) => (
             <Pressable
               key={t.days}
               onPress={() => setBoostTierIdx(i)}

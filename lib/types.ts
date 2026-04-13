@@ -71,13 +71,21 @@ export interface ContactPack {
 export interface Payment {
   id: string
   user_id: string
-  type: 'profiles_access' | 'contact_pack' | 'boost'
-  provider?: PaymentProvider
-  amount_cents: number
+  /** provider métier (ex. profiles_access, contact_pack, visibility_boost). */
+  provider?: string | null
+  /** provider passerelle paiement (ex. Badiboss Pay). */
+  payment_provider?: string | null
+  payment_method?: string | null
+  transaction_ref?: string | null
+  subscription_id?: string | null
+  amount: number
   currency: string
   status: 'pending' | 'completed' | 'failed' | 'refunded'
-  reference: string | null
-  metadata: Record<string, unknown>
+  /** Rétrocompat: certains environnements historiques utilisaient ces champs. */
+  type?: 'profiles_access' | 'contact_pack' | 'boost'
+  amount_cents?: number
+  reference?: string | null
+  metadata?: Record<string, unknown>
   created_at: string
 }
 
