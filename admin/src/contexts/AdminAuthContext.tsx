@@ -27,8 +27,8 @@ function logOnce(level: 'info' | 'warn' | 'error', key: string, payload?: unknow
   if (now - prev < cooldownMs) return
   lastLogAt.set(key, now)
   if (level === 'error') console.error(key, payload)
-  else if (level === 'warn') console.warn(key, payload)
-  else if (ADMIN_DEBUG) console.info(key, payload)
+  else if (ADMIN_DEBUG && level === 'warn') console.warn(key, payload)
+  else if (ADMIN_DEBUG && level === 'info') console.info(key, payload)
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
