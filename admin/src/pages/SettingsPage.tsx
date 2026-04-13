@@ -59,6 +59,7 @@ export function SettingsPage() {
   const [settings, setSettings] = useState<Setting[]>([])
   const [loading, setLoading] = useState(true)
   const [boostOffersText, setBoostOffersText] = useState('[]')
+  const [boostOffers, setBoostOffers] = useState<Array<{ id: string; label: string; days: number; amount: number; active: boolean }>>([])
   const [savingOffers, setSavingOffers] = useState(false)
 
   const load = useCallback(async () => {
@@ -73,8 +74,24 @@ export function SettingsPage() {
 
   useEffect(() => {
     const current = settings.find((s) => s.key === 'visibility_boost_offers')
-    if (!current) return
-    setBoostOffersText(JSON.stringify(current.value ?? [], null, 2))
+    if (!current || !Array.isArray(current.value)) return
+    const parsed = (current.value as unknown[])
+      .map((x, i) => {
+        const r = x as { id?: unknown; label?: unknown; days?: unknown; amount?: unknown; active?: unknown }
+        const days = Number(r.days)
+        const amount = Number(r.amount)
+        if (!Number.isFinite(days) || days <= 0 || !Number.isFinite(amount) || amount < 0) return null
+        return {
+          id: typeof r.id === 'string' && r.id.trim() ? r.id : `offer_${i + 1}`,
+          label: typeof r.label === 'string' ? r.label : `${days} jours`,
+          days,
+          amount,
+          active: typeof r.active === 'boolean' ? r.active : true,
+        }
+      })
+      .filter(Boolean) as Array<{ id: string; label: string; days: number; amount: number; active: boolean }>
+    setBoostOffers(parsed)
+    setBoostOffersText(JSON.stringify(parsed, null, 2))
   }, [settings])
 
   const { wired, other } = useMemo(() => {
@@ -92,28 +109,15 @@ export function SettingsPage() {
   }
 
   const saveBoostOffers = async () => {
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(boostOffersText || '[]')
-    } catch {
-      alert('JSON invalide pour les offres boost.')
-      return
-    }
-    if (!Array.isArray(parsed)) {
-      alert('Le JSON doit être un tableau.')
-      return
-    }
-    const normalized = parsed
-      .map((x) => {
-        const rec = x as { days?: unknown; amount?: unknown; label?: unknown }
-        const days = Number(rec.days)
-        const amount = Number(rec.amount)
-        const label = typeof rec.label === 'string' ? rec.label.trim() : `${days} jours`
-        if (!Number.isFinite(days) || days <= 0) return null
-        if (!Number.isFinite(amount) || amount < 0) return null
-        return { days, amount, label }
-      })
-      .filter(Boolean)
+    const normalized = boostOffers
+      .map((r) => ({
+        id: r.id.trim() || `offer_${Math.random().toString(36).slice(2, 7)}`,
+        label: r.label.trim() || `${r.days} jours`,
+        days: Number(r.days),
+        amount: Number(r.amount),
+        active: !!r.active,
+      }))
+      .filter((r) => Number.isFinite(r.days) && r.days > 0 && Number.isFinite(r.amount) && r.amount >= 0)
     if (normalized.length === 0) {
       alert('Aucune offre valide.')
       return
@@ -130,6 +134,7 @@ export function SettingsPage() {
       alert(`Erreur enregistrement offres boost: ${error.message}`)
       return
     }
+    setBoostOffersText(JSON.stringify(normalized, null, 2))
     await load()
   }
 
@@ -179,19 +184,52 @@ export function SettingsPage() {
 
       <section className="dashboard-section" style={{ marginTop: 28 }}>
         <h2>Offres boost (effet immédiat côté app)</h2>
-        <p className="text-secondary" style={{ marginTop: 6 }}>
-          JSON tableau: {`[{ "days": 7, "amount": 9.99, "label": "7 jours" }]`}
-        </p>
-        <textarea
-          style={{ width: '100%', minHeight: 160, marginTop: 10 }}
-          value={boostOffersText}
-          onChange={(e) => setBoostOffersText(e.target.value)}
-        />
+        <p className="text-secondary" style={{ marginTop: 6 }}>Prix/durée modifiables sans redéploiement. Les offres inactives restent en historique mais ne s’affichent plus côté app.</p>
+        <div className="table-wrap" style={{ marginTop: 12 }}>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Libellé</th>
+                <th>Durée (jours)</th>
+                <th>Prix (USD)</th>
+                <th>Active</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {boostOffers.map((o, idx) => (
+                <tr key={`${o.id}-${idx}`}>
+                  <td><input value={o.id} onChange={(e) => setBoostOffers((prev) => prev.map((x, i) => i === idx ? { ...x, id: e.target.value } : x))} /></td>
+                  <td><input value={o.label} onChange={(e) => setBoostOffers((prev) => prev.map((x, i) => i === idx ? { ...x, label: e.target.value } : x))} /></td>
+                  <td><input type="number" min={1} value={o.days} onChange={(e) => setBoostOffers((prev) => prev.map((x, i) => i === idx ? { ...x, days: Number(e.target.value) } : x))} /></td>
+                  <td><input type="number" min={0} step="0.01" value={o.amount} onChange={(e) => setBoostOffers((prev) => prev.map((x, i) => i === idx ? { ...x, amount: Number(e.target.value) } : x))} /></td>
+                  <td><input type="checkbox" checked={o.active} onChange={(e) => setBoostOffers((prev) => prev.map((x, i) => i === idx ? { ...x, active: e.target.checked } : x))} /></td>
+                  <td><button type="button" className="secondary" onClick={() => setBoostOffers((prev) => prev.filter((_, i) => i !== idx))}>Retirer</button></td>
+                </tr>
+              ))}
+              {boostOffers.length === 0 ? (
+                <tr><td colSpan={6}>Aucune offre.</td></tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
         <div className="form-actions">
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => setBoostOffers((prev) => [...prev, { id: `offer_${Date.now()}`, label: 'Nouvelle offre', days: 7, amount: 9.99, active: true }])}
+          >
+            Ajouter une offre
+          </button>
           <button type="button" onClick={() => void saveBoostOffers()} disabled={savingOffers}>
             {savingOffers ? 'Enregistrement…' : 'Enregistrer les offres boost'}
           </button>
         </div>
+        <details style={{ marginTop: 12 }}>
+          <summary>JSON généré (debug)</summary>
+          <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12 }}>{boostOffersText}</pre>
+        </details>
       </section>
     </div>
   )

@@ -60,10 +60,12 @@ export default function PaymentsScreen() {
       if (!Array.isArray(raw)) return
       const parsed = raw
         .map((x) => {
-          const rec = x as { days?: unknown; amount?: unknown; label?: unknown }
+          const rec = x as { days?: unknown; amount?: unknown; label?: unknown; active?: unknown }
           const days = Number(rec.days)
           const amount = Number(rec.amount)
           const label = typeof rec.label === 'string' ? rec.label.trim() : `${days} jours`
+          const active = typeof rec.active === 'boolean' ? rec.active : true
+          if (!active) return null
           if (!Number.isFinite(days) || days <= 0) return null
           if (!Number.isFinite(amount) || amount < 0) return null
           return { days, amount, label } as BoostTier

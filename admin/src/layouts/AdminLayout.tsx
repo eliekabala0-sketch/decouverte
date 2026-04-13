@@ -21,6 +21,11 @@ const nav = [
 export function AdminLayout({ children }: { children?: React.ReactNode }) {
   const { signOut } = useAdminAuth()
   const { loading, isEnabled } = useFeatureFlags()
+  const quick = [
+    { to: '/users', label: 'Utilisateurs' },
+    { to: '/conversations', label: 'Conversations' },
+    { to: '/settings', label: 'Paramètres' },
+  ]
 
   return (
     <div className="admin-layout">
@@ -53,6 +58,13 @@ export function AdminLayout({ children }: { children?: React.ReactNode }) {
         </div>
       </aside>
       <main className="admin-main">
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+          {quick.map((q) => (
+            <NavLink key={q.to} to={q.to} className="admin-nav-link" style={{ padding: '6px 10px', borderRadius: 8 }}>
+              {q.label}
+            </NavLink>
+          ))}
+        </div>
         {children ?? <Outlet />}
       </main>
     </div>

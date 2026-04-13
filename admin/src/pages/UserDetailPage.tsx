@@ -8,6 +8,15 @@ import { GENDER_LABELS } from '@shared/constants'
 import './DashboardPage.css'
 
 type PhotoRow = { id: string; photo_url: string; is_primary: boolean }
+type PackRow = {
+  id: string
+  name: string
+  quota?: number
+  contact_quota?: number | null
+  photo_quota?: number | null
+  all_profiles_access?: boolean | null
+  price_cents?: number
+}
 
 type ProfileEditableFields = Pick<Profile, 'boost_reason' | 'mode_libre_active' | 'mode_serieux_active'>
 
@@ -24,11 +33,14 @@ export function UserDetailPage() {
   const [access, setAccess] = useState<ProfileAccess | null>(null)
   const [photos, setPhotos] = useState<PhotoRow[]>([])
   const [payments, setPayments] = useState<Record<string, unknown>[]>([])
+  const [packs, setPacks] = useState<PackRow[]>([])
   const [loading, setLoading] = useState(true)
   const [msg, setMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
   const [pw, setPw] = useState('')
   const [dm, setDm] = useState('')
+  const [giftPackId, setGiftPackId] = useState('')
+  const [giftReason, setGiftReason] = useState('geste commercial')
 
   const [accForm, setAccForm] = useState({
     contact_quota: 0,
@@ -67,6 +79,12 @@ export function UserDetailPage() {
       .order('created_at', { ascending: false })
       .limit(25)
     setPayments((pay ?? []) as Record<string, unknown>[])
+    const { data: pk } = await supabase
+      .from('contact_packs')
+      .select('id,name,quota,contact_quota,photo_quota,all_profiles_access,price_cents')
+      .eq('is_active', true)
+      .order('sort_order', { ascending: true })
+    setPacks((pk ?? []) as PackRow[])
 
     setLoading(false)
   }, [userId])
@@ -173,6 +191,53 @@ export function UserDetailPage() {
       setMsg({ type: 'success', text: 'Message envoyé (visible dans Messages de l’utilisateur).' })
     } catch (e: unknown) {
       setMsg({ type: 'error', text: e instanceof Error ? e.message : 'Échec envoi' })
+    }
+  }
+
+  const giftPack = async () => {
+    if (!userId || !giftPackId) return
+    const pack = packs.find((p) => p.id === giftPackId)
+    if (!pack) return
+    setMsg(null)
+    const addContacts = pack.contact_quota ?? pack.quota ?? 0
+    const addPhotos = pack.photo_quota ?? 0
+    const allAccess = !!pack.all_profiles_access
+    try {
+      const currentQuota = access?.contact_quota ?? 0
+      const currentUsed = access?.contact_quota_used ?? 0
+      const currentPhoto = access?.photo_quota ?? 0
+      const currentPhotoUsed = access?.photo_quota_used ?? 0
+
+      const { error: upErr } = await supabase.from('profile_access').upsert(
+        {
+          user_id: userId,
+          contact_quota: currentQuota + addContacts,
+          contact_quota_used: currentUsed,
+          photo_quota: currentPhoto + addPhotos,
+          photo_quota_used: currentPhotoUsed,
+          all_profiles_access: !!((access?.all_profiles_access ?? false) || allAccess),
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'user_id' },
+      )
+      if (upErr) throw upErr
+
+      const { error: payErr } = await supabase.from('payments').insert({
+        user_id: userId,
+        amount: 0,
+        currency: 'USD',
+        payment_method: 'Admin grant',
+        payment_provider: 'Admin grant',
+        provider: 'contact_pack_gift',
+        transaction_ref: `gift-${Date.now()}-${giftReason.replace(/\s+/g, '-').slice(0, 24)}`,
+        status: 'completed',
+      })
+      if (payErr) throw payErr
+
+      setMsg({ type: 'success', text: `Pack offert appliqué: ${pack.name}${giftReason ? ` (${giftReason})` : ''}.` })
+      await load()
+    } catch (e: unknown) {
+      setMsg({ type: 'error', text: e instanceof Error ? e.message : 'Attribution pack échouée.' })
     }
   }
 
@@ -366,6 +431,33 @@ export function UserDetailPage() {
           <button type="button" onClick={() => void sendDirectMessage()}>
             Envoyer
           </button>
+        </div>
+      </section>
+
+      <section className="dashboard-section">
+        <h2>Offrir un pack</h2>
+        <p className="text-secondary">Attribue immédiatement un pack actif au client, avec traçabilité paiement offert.</p>
+        <div className="form-grid" style={{ marginTop: 12 }}>
+          <div className="form-group">
+            <label>Pack</label>
+            <select value={giftPackId} onChange={(e) => setGiftPackId(e.target.value)}>
+              <option value="">— Choisir —</option>
+              {packs.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} ({(p.contact_quota ?? p.quota ?? 0)} contacts{p.photo_quota ? `, ${p.photo_quota} photos` : ''})
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="form-group">
+            <label>Raison</label>
+            <input value={giftReason} onChange={(e) => setGiftReason(e.target.value)} />
+          </div>
+          <div className="form-actions">
+            <button type="button" onClick={() => void giftPack()} disabled={!giftPackId}>
+              Offrir ce pack
+            </button>
+          </div>
         </div>
       </section>
 

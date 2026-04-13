@@ -5,6 +5,7 @@ import { DashboardHome } from './pages/DashboardHome'
 import { UsersPage } from './pages/UsersPage'
 import { ProfilesPage } from './pages/ProfilesPage'
 import { ConversationsPage } from './pages/ConversationsPage'
+import { ConversationDetailPage } from './pages/ConversationDetailPage'
 import { ReportsPage } from './pages/ReportsPage'
 import { PaymentsPage } from './pages/PaymentsPage'
 import { ContactPacksPage } from './pages/ContactPacksPage'
@@ -48,6 +49,7 @@ export default function App() {
                 <Route path="users/:userId" element={<UserDetailPage />} />
                 <Route path="profiles" element={<ProfilesPage />} />
                 <Route path="conversations" element={<ConversationsPage />} />
+                <Route path="conversations/:id" element={<ConversationDetailPage />} />
                 <Route path="reports" element={<ReportsPage />} />
                 <Route path="payments" element={<PaymentsPage />} />
                 <Route path="contact-packs" element={<ContactPacksPage />} />
