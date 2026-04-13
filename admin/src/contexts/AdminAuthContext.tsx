@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { supabase } from '@lib/supabase'
 import type { User } from '@supabase/supabase-js'
 import { roleIsAdmin } from '@shared/profileRole'
@@ -68,6 +68,7 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
   const [isAdmin, setIsAdmin] = useState(false)
   const [loading, setLoading] = useState(true)
   const [authError, setAuthError] = useState<string | null>(null)
+  const validatedAdminUserIdRef = useRef<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -76,8 +77,10 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
       if (!cancelled) setLoading(false)
     }
 
-    const applyUserAndAdmin = async (current: User | null) => {
+    const applyUserAndAdmin = async (current: User | null, source: string) => {
       if (!current?.id) {
+        console.info('[admin-auth] session absente', { source })
+        validatedAdminUserIdRef.current = null
         setIsAdmin(false)
         setAuthError(null)
         return
@@ -85,15 +88,43 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
       const { ok, error } = await fetchProfileIsAdmin(current.id)
       if (cancelled) return
       if (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        const isTimeout = message.toLowerCase().includes('délai')
+        const hasStableValidatedAdmin = validatedAdminUserIdRef.current === current.id
+        if (hasStableValidatedAdmin) {
+          console.warn('[admin-auth] revalidation admin échouée, session conservée', {
+            source,
+            authUserId: current.id,
+            reason: isTimeout ? 'timeout réseau' : 'erreur requête',
+            error: message,
+          })
+          // On ne force pas logout/redirect pour un admin déjà validé.
+          return
+        }
+        console.error('[admin-auth] revalidation admin échouée, accès refusé', {
+          source,
+          authUserId: current.id,
+          reason: isTimeout ? 'timeout réseau' : 'erreur requête',
+          error: message,
+        })
+        validatedAdminUserIdRef.current = null
         setIsAdmin(false)
         setAuthError(
-          'Impossible de vérifier le rôle admin (réseau, RLS ou délai dépassé). Réessayez dans un instant.'
+          isTimeout
+            ? 'Impossible de vérifier le rôle admin (délai réseau). Réessayez dans un instant.'
+            : 'Impossible de vérifier le rôle admin (réseau ou RLS). Réessayez dans un instant.'
         )
         return
       }
       setIsAdmin(ok)
-      if (!ok) setAuthError('Compte non autorisé pour le dashboard admin.')
-      else setAuthError(null)
+      if (!ok) {
+        validatedAdminUserIdRef.current = null
+        console.warn('[admin-auth] rôle non admin', { source, authUserId: current.id })
+        setAuthError('Compte non autorisé pour le dashboard admin.')
+      } else {
+        validatedAdminUserIdRef.current = current.id
+        setAuthError(null)
+      }
     }
 
     const runBootstrap = async () => {
@@ -109,7 +140,7 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
         }
         const current = session?.user ?? null
         if (!cancelled) setUser(current)
-        await applyUserAndAdmin(current)
+        await applyUserAndAdmin(current, 'bootstrap')
       } catch (e) {
         console.error('[admin-auth] bootstrap', e)
         if (!cancelled) {
@@ -133,6 +164,8 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
     } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (cancelled) return
       if (event === 'SIGNED_OUT') {
+        console.info('[admin-auth] session absente (SIGNED_OUT)')
+        validatedAdminUserIdRef.current = null
         setUser(null)
         setIsAdmin(false)
         setAuthError('Session expirée. Veuillez vous reconnecter.')
@@ -141,20 +174,30 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
       const current = session?.user ?? null
       setUser(current)
       try {
-        await applyUserAndAdmin(current)
+        await applyUserAndAdmin(current, `onAuthStateChange:${event}`)
       } catch (e) {
         console.error('[admin-auth] onAuthStateChange', e)
-        setIsAdmin(false)
-        setAuthError(
-          e instanceof Error
-            ? `Erreur lors de la mise à jour de la session : ${e.message}`
-            : 'Erreur lors de la mise à jour de la session.'
-        )
+        const stable = !!current?.id && validatedAdminUserIdRef.current === current.id
+        if (!stable) {
+          validatedAdminUserIdRef.current = null
+          setIsAdmin(false)
+          setAuthError(
+            e instanceof Error
+              ? `Erreur lors de la mise à jour de la session : ${e.message}`
+              : 'Erreur lors de la mise à jour de la session.'
+          )
+        } else {
+          console.warn('[admin-auth] erreur onAuthStateChange, session admin conservée', {
+            event,
+            authUserId: current.id,
+          })
+        }
       }
     })
 
     return () => {
       cancelled = true
+      validatedAdminUserIdRef.current = null
       subscription.unsubscribe()
     }
   }, [])
@@ -179,6 +222,7 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
       )
       await supabase.auth.signOut()
       setUser(null)
+      validatedAdminUserIdRef.current = null
       setIsAdmin(false)
       return { error: e instanceof Error ? e : new Error('getUser failed') }
     }
@@ -187,6 +231,7 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
       setAuthError('Session invalide après connexion.')
       await supabase.auth.signOut()
       setUser(null)
+      validatedAdminUserIdRef.current = null
       setIsAdmin(false)
       return { error: new Error('Session invalide après connexion.') }
     }
@@ -198,6 +243,7 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
       )
       await supabase.auth.signOut()
       setUser(null)
+      validatedAdminUserIdRef.current = null
       setIsAdmin(false)
       return { error: roleErr }
     }
@@ -205,6 +251,7 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
       setAuthError('Compte non autorisé pour le dashboard admin.')
       await supabase.auth.signOut()
       setUser(null)
+      validatedAdminUserIdRef.current = null
       setIsAdmin(false)
       return { error: new Error('Compte non autorisé pour le dashboard admin.') }
     }
@@ -217,6 +264,7 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
   const signOut = async () => {
     await supabase.auth.signOut()
     setUser(null)
+    validatedAdminUserIdRef.current = null
     setIsAdmin(false)
     setAuthError(null)
   }

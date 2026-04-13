@@ -20,17 +20,31 @@ export function BoostsPage() {
   const [boosted, setBoosted] = useState<ProfileRow[]>([])
   const [allProfiles, setAllProfiles] = useState<ProfileRow[]>([])
   const [loading, setLoading] = useState(true)
+  const [pageError, setPageError] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState('')
   const [reason, setReason] = useState<typeof BOOST_REASONS[number]['value']>('admin')
 
   const load = async () => {
-    const [r1, r2] = await Promise.all([
-      supabase.from('profiles').select('id, username, boost_reason').not('boost_reason', 'is', null),
-      supabase.from('profiles').select('id, username').eq('status', 'active').order('username'),
-    ])
-    setBoosted((r1.data ?? []) as ProfileRow[])
-    setAllProfiles((r2.data ?? []) as ProfileRow[])
-    setLoading(false)
+    setPageError(null)
+    try {
+      const [r1, r2] = await Promise.all([
+        supabase.from('profiles').select('id, username, boost_reason').not('boost_reason', 'is', null),
+        supabase.from('profiles').select('id, username').eq('status', 'active').order('username'),
+      ])
+      if (r1.error || r2.error) {
+        const msg = r1.error?.message || r2.error?.message || 'Erreur de chargement des mises en avant.'
+        console.error('[admin-boosts] load error', { boostedError: r1.error, profilesError: r2.error })
+        setPageError(msg)
+        return
+      }
+      setBoosted((r1.data ?? []) as ProfileRow[])
+      setAllProfiles((r2.data ?? []) as ProfileRow[])
+    } catch (e) {
+      console.error('[admin-boosts] load exception', e)
+      setPageError(e instanceof Error ? e.message : 'Erreur de chargement des mises en avant.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => {
@@ -39,14 +53,24 @@ export function BoostsPage() {
 
   const addBoost = async () => {
     if (!selectedId) return
-    await supabase.from('profiles').update({ boost_reason: reason }).eq('id', selectedId)
+    const { error } = await supabase.from('profiles').update({ boost_reason: reason }).eq('id', selectedId)
+    if (error) {
+      console.error('[admin-boosts] add error', error)
+      setPageError(error.message || 'Impossible d’ajouter la mise en avant.')
+      return
+    }
     setSelectedId('')
-    load()
+    void load()
   }
 
   const removeBoost = async (id: string) => {
-    await supabase.from('profiles').update({ boost_reason: null }).eq('id', id)
-    load()
+    const { error } = await supabase.from('profiles').update({ boost_reason: null }).eq('id', id)
+    if (error) {
+      console.error('[admin-boosts] remove error', error)
+      setPageError(error.message || 'Impossible de retirer la mise en avant.')
+      return
+    }
+    void load()
   }
 
   if (loading) return <div className="page-loading">Chargement...</div>
@@ -56,6 +80,7 @@ export function BoostsPage() {
       <div>
         <h1 className="page-title">Mises en avant</h1>
         <p className="page-subtitle">Mettre en avant un profil (colonne boost_reason sur le schéma réel).</p>
+        {pageError ? <p className="page-subtitle" style={{ color: 'var(--error)' }}>{pageError}</p> : null}
         <section className="dashboard-section" style={{ marginBottom: 24 }}>
           <h2>Mettre un profil en avant</h2>
           <div className="form-grid">
