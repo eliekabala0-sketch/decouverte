@@ -57,22 +57,26 @@ async function fetchProfileIsAdmin(userId: string): Promise<{ ok: boolean; error
   if (!userId) {
     return { ok: false, error: null }
   }
-  const res = await withTimeout(
-    Promise.resolve(supabase.from('profiles').select('role').eq('id', userId).maybeSingle()),
-    PROFILE_ROLE_TIMEOUT_MS,
-    'Lecture du rôle (profiles.id = auth.uid)'
-  )
-  if (res.error) {
-    logOnce('error', '[admin-auth] profiles.select(role)', { authUserId: userId, error: res.error })
-    return { ok: false, error: res.error instanceof Error ? res.error : new Error(String(res.error)) }
+  try {
+    const res = await withTimeout(
+      Promise.resolve(supabase.from('profiles').select('role').eq('id', userId).maybeSingle()),
+      PROFILE_ROLE_TIMEOUT_MS,
+      'Lecture du rôle (profiles.id = auth.uid)'
+    )
+    if (res.error) {
+      logOnce('error', '[admin-auth] profiles.select(role)', { authUserId: userId, error: res.error })
+      return { ok: false, error: res.error instanceof Error ? res.error : new Error(String(res.error)) }
+    }
+    const ok = roleIsAdmin((res.data as { role?: unknown } | null)?.role)
+    logOnce('info', `[admin-auth] role-check:${userId}:${ok ? 'ok' : 'ko'}`, {
+      authUserId: userId,
+      role: (res.data as { role?: unknown } | null)?.role ?? null,
+      ok,
+    }, 20000)
+    return { ok, error: null }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e : new Error(String(e)) }
   }
-  const ok = roleIsAdmin((res.data as { role?: unknown } | null)?.role)
-  logOnce('info', `[admin-auth] role-check:${userId}:${ok ? 'ok' : 'ko'}`, {
-    authUserId: userId,
-    role: (res.data as { role?: unknown } | null)?.role ?? null,
-    ok,
-  }, 20000)
-  return { ok, error: null }
 }
 
 export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
@@ -185,6 +189,14 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
       }
       const current = session?.user ?? null
       setUser(current)
+      if (
+        event === 'TOKEN_REFRESHED' &&
+        !!current?.id &&
+        validatedAdminUserIdRef.current === current.id
+      ) {
+        // Évite de revalider le rôle à chaque refresh token (source de timeouts/bruit console).
+        return
+      }
       try {
         await applyUserAndAdmin(current, `onAuthStateChange:${event}`)
       } catch (e) {

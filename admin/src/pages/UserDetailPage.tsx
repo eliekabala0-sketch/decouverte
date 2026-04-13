@@ -237,7 +237,13 @@ export function UserDetailPage() {
       setMsg({ type: 'success', text: `Pack offert appliqué: ${pack.name}${giftReason ? ` (${giftReason})` : ''}.` })
       await load()
     } catch (e: unknown) {
-      setMsg({ type: 'error', text: e instanceof Error ? e.message : 'Attribution pack échouée.' })
+      if (e && typeof e === 'object') {
+        const rec = e as { message?: string; code?: string; details?: string; hint?: string }
+        const extra = [rec.code, rec.details, rec.hint].filter(Boolean).join(' | ')
+        setMsg({ type: 'error', text: `${rec.message ?? 'Attribution pack échouée.'}${extra ? ` (${extra})` : ''}` })
+      } else {
+        setMsg({ type: 'error', text: 'Attribution pack échouée.' })
+      }
     }
   }
 
