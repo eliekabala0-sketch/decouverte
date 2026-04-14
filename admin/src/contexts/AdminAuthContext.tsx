@@ -21,14 +21,58 @@ const PROFILE_ROLE_TIMEOUT_MS = 15_000
 const ADMIN_DEBUG = import.meta.env.VITE_ADMIN_DEBUG === 'true'
 
 const lastLogAt = new Map<string, number>()
-function logOnce(level: 'info' | 'warn' | 'error', key: string, payload?: unknown, cooldownMs = 10_000) {
+type LogLevel = 'info' | 'warn' | 'error'
+type AuthIssueKind = 'application_error' | 'network_timeout' | 'browser_extension_noise'
+
+function serializeLogPayload(payload?: unknown): string {
+  if (payload == null) return ''
+  if (payload instanceof Error) {
+    return JSON.stringify(
+      {
+        name: payload.name,
+        message: payload.message,
+        stack: payload.stack,
+      },
+      null,
+      2
+    )
+  }
+  try {
+    return JSON.stringify(payload, null, 2)
+  } catch {
+    return String(payload)
+  }
+}
+
+function classifyIssue(message: string): AuthIssueKind {
+  const lower = message.toLowerCase()
+  if (
+    lower.includes('délai') ||
+    lower.includes('timeout') ||
+    lower.includes('network') ||
+    lower.includes('failed to fetch')
+  ) {
+    return 'network_timeout'
+  }
+  if (
+    lower.includes('listener indicated an asynchronous response') ||
+    lower.includes('a listener indicated an asynchronous response')
+  ) {
+    return 'browser_extension_noise'
+  }
+  return 'application_error'
+}
+
+function logOnce(level: LogLevel, key: string, payload?: unknown, cooldownMs = 10_000) {
   const now = Date.now()
   const prev = lastLogAt.get(key) ?? 0
   if (now - prev < cooldownMs) return
   lastLogAt.set(key, now)
-  if (level === 'error') console.error(key, payload)
-  else if (ADMIN_DEBUG && level === 'warn') console.warn(key, payload)
-  else if (ADMIN_DEBUG && level === 'info') console.info(key, payload)
+  const body = serializeLogPayload(payload)
+  const line = body ? `${key} ${body}` : key
+  if (level === 'error') console.error(line)
+  else if (ADMIN_DEBUG && level === 'warn') console.warn(line)
+  else if (ADMIN_DEBUG && level === 'info') console.info(line)
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
@@ -64,7 +108,6 @@ async function fetchProfileIsAdmin(userId: string): Promise<{ ok: boolean; error
       'Lecture du rôle (profiles.id = auth.uid)'
     )
     if (res.error) {
-      logOnce('error', '[admin-auth] profiles.select(role)', { authUserId: userId, error: res.error })
       return { ok: false, error: res.error instanceof Error ? res.error : new Error(String(res.error)) }
     }
     const ok = roleIsAdmin((res.data as { role?: unknown } | null)?.role)
@@ -105,24 +148,26 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
       if (cancelled) return
       if (error) {
         const message = error instanceof Error ? error.message : String(error)
-        const isTimeout = message.toLowerCase().includes('délai')
+        const issueKind = classifyIssue(message)
+        const isTimeout = issueKind === 'network_timeout'
         const hasStableValidatedAdmin = validatedAdminUserIdRef.current === current.id
+        const logPayload = {
+          source,
+          authUserId: current.id,
+          issueKind,
+          blocking: !hasStableValidatedAdmin,
+          error: {
+            name: error.name,
+            message: error.message,
+          },
+        }
         if (hasStableValidatedAdmin) {
-          logOnce('warn', '[admin-auth] revalidation admin échouée, session conservée', {
-            source,
-            authUserId: current.id,
-            reason: isTimeout ? 'timeout réseau' : 'erreur requête',
-            error: message,
-          }, 15000)
+          logOnce('warn', '[admin-auth] revalidation non bloquante (session conservée)', logPayload, 15000)
           // On ne force pas logout/redirect pour un admin déjà validé.
           return
         }
-        logOnce('error', '[admin-auth] revalidation admin échouée, accès refusé', {
-          source,
-          authUserId: current.id,
-          reason: isTimeout ? 'timeout réseau' : 'erreur requête',
-          error: message,
-        }, 10000)
+        const level: LogLevel = issueKind === 'application_error' ? 'error' : 'warn'
+        logOnce(level, '[admin-auth] revalidation admin bloquée (accès temporairement refusé)', logPayload, 10000)
         validatedAdminUserIdRef.current = null
         setIsAdmin(false)
         setAuthError(
@@ -158,7 +203,14 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
         if (!cancelled) setUser(current)
         await applyUserAndAdmin(current, 'bootstrap')
       } catch (e) {
-        logOnce('error', '[admin-auth] bootstrap', e)
+        const message = e instanceof Error ? e.message : String(e)
+        const issueKind = classifyIssue(message)
+        const level: LogLevel = issueKind === 'application_error' ? 'error' : 'warn'
+        logOnce(level, '[admin-auth] bootstrap', {
+          issueKind,
+          blocking: true,
+          error: e instanceof Error ? { name: e.name, message: e.message } : { message: String(e) },
+        })
         if (!cancelled) {
           setUser(null)
           setIsAdmin(false)
