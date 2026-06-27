@@ -6,28 +6,11 @@ import { Image } from 'expo-image'
 import { useTheme } from '@/theme/ThemeContext'
 import { useAuth } from '@/contexts/AuthContext'
 import { insertProfilePhoto, setPrimaryPhoto, uploadProfilePhoto } from '../../lib/profilePhotos'
-const REFRESH_MS = 8000
-
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(`${label} (délai ${ms / 1000}s dépassé)`)), ms)
-    promise.then(
-      (v) => {
-        clearTimeout(t)
-        resolve(v)
-      },
-      (e) => {
-        clearTimeout(t)
-        reject(e)
-      }
-    )
-  })
-}
 
 export default function AddAvatarScreen() {
   const router = useRouter()
   const { colors, spacing } = useTheme()
-  const { user, profile, refreshProfile, loading } = useAuth()
+  const { user, profile, refreshProfile, primeProfile, loading } = useAuth()
 
   const [localUri, setLocalUri] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -38,21 +21,19 @@ export default function AddAvatarScreen() {
     try {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync()
       if (!perm.granted) {
-        setErrorText('Accès à la galerie refusé. Autorisez les photos dans les paramètres.')
+        setErrorText('Acces a la galerie refuse. Autorisez les photos dans les parametres.')
         return
       }
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        // Web : le recadrage produit souvent une URI où fetch() ne se termine jamais → pas de crop sur web.
         allowsEditing: Platform.OS !== 'web',
         aspect: [1, 1],
-        quality: 0.85,
+        quality: 0.7,
       })
       if (result.canceled || !result.assets?.[0]) return
-      const asset = result.assets[0]
-      setLocalUri(asset.uri)
+      setLocalUri(result.assets[0].uri)
     } catch (e) {
-      setErrorText(e instanceof Error ? e.message : 'Impossible d’ouvrir la galerie.')
+      setErrorText(e instanceof Error ? e.message : "Impossible d'ouvrir la galerie.")
     }
   }
 
@@ -65,14 +46,11 @@ export default function AddAvatarScreen() {
       const photoId = await insertProfilePhoto(user.id, publicUrl, true)
       await setPrimaryPhoto(user.id, photoId, publicUrl)
 
-      try {
-        await withTimeout(refreshProfile(), REFRESH_MS, 'Actualisation du profil')
-      } catch {
-        // La ligne DB est à jour ; évite de bloquer la navigation si refresh réseau/Auth reste en attente.
-      }
+      primeProfile(profile ? { ...profile, photo: publicUrl } : null)
+      void refreshProfile()
       router.replace('/(app)/home')
     } catch (e) {
-      setErrorText(e instanceof Error ? e.message : 'Erreur lors de l’upload.')
+      setErrorText(e instanceof Error ? e.message : "Erreur lors de l'upload.")
     } finally {
       setSaving(false)
     }

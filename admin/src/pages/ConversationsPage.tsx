@@ -3,6 +3,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '@lib/supabase'
 import './DashboardPage.css'
 
+const PAGE_SIZE = 150
+
 type Conv = { id: string; participant_ids: string[]; last_message_at: string; created_at: string }
 
 export function ConversationsPage() {
@@ -16,14 +18,18 @@ export function ConversationsPage() {
   useEffect(() => {
     const load = async () => {
       setError(null)
-      const { data, error } = await supabase.from('conversations').select('*').order('last_message_at', { ascending: false })
+      let query = supabase
+        .from('conversations')
+        .select('id,participant_ids,last_message_at,created_at')
+        .order('last_message_at', { ascending: false })
+        .limit(PAGE_SIZE)
+      if (filterUserId) query = query.contains('participant_ids', [filterUserId])
+      const { data, error } = await query
       if (error) {
         setError(error.message)
         setConversations([])
       } else {
-        const all = (data ?? []) as Conv[]
-        const filtered = filterUserId ? all.filter((c) => (c.participant_ids ?? []).includes(filterUserId)) : all
-        setConversations(filtered)
+        setConversations((data ?? []) as Conv[])
       }
       setLoading(false)
     }

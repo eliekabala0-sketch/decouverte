@@ -39,17 +39,10 @@ function toIsoDate(year: number, month: number, day: number): string {
   return `${year}-${mm}-${dd}`
 }
 
-async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
-  return await Promise.race([
-    p,
-    new Promise<T>((_resolve, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
-  ])
-}
-
 export default function CreateProfileScreen() {
   const router = useRouter()
   const { colors, spacing } = useTheme()
-  const { user, profile, refreshProfile, loading: authLoading } = useAuth()
+  const { user, profile, refreshProfile, primeProfile, loading: authLoading } = useAuth()
 
   const [username, setUsername] = useState('')
   const [gender, setGender] = useState<Gender>('M')
@@ -144,6 +137,7 @@ export default function CreateProfileScreen() {
     try {
       const payloadBase = {
         id: user.id,
+        created_at: new Date().toISOString(),
         phone,
         username: username.trim(),
         gender,
@@ -165,12 +159,12 @@ export default function CreateProfileScreen() {
       }
       dbg(`Colonnes: ${Object.keys(payloadWithModes).join(', ')}`)
       const insertPromise = (async () => {
-        const first = await supabase.from('profiles').insert(payloadWithModes)
+        const first = await supabase.from('profiles').insert(payloadWithModes).select('id').single()
         if (!first.error) return first
         const msg = (first.error.message || '').toLowerCase()
         const missingModeCols = msg.includes('mode_libre_active') || msg.includes('mode_serieux_active')
         if (missingModeCols && msg.includes('could not find')) {
-          return await supabase.from('profiles').insert(payloadBase)
+          return await supabase.from('profiles').insert(payloadBase).select('id').single()
         }
         return first
       })()
@@ -188,22 +182,8 @@ export default function CreateProfileScreen() {
         setErrorText(res.error.message || 'Erreur lors de la création du profil.')
         return
       }
-      const verifyRow = async () =>
-        supabase.from('profiles').select('id').eq('id', user.id).maybeSingle()
-      const check = await withTimeout(verifyRow(), 8000)
-      if (check.error) {
-        setErrorText(check.error.message || 'Profil créé mais non vérifiable.')
-        return
-      }
-      if (!check.data?.id) {
-        setErrorText('Création du profil non confirmée. Réessayez.')
-        return
-      }
-      try {
-        await withTimeout(refreshProfile(), 2500)
-      } catch {
-        // non bloquant
-      }
+      primeProfile(payloadWithModes)
+      void refreshProfile()
       router.replace('/(auth)/add-avatar')
     } catch (e) {
       setErrorText(e instanceof Error ? e.message : 'Erreur lors de la création du profil.')

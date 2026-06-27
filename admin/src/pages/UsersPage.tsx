@@ -4,6 +4,8 @@ import { supabase } from '@lib/supabase'
 import { PageHeader } from '../components/PageHeader'
 import './DashboardPage.css'
 
+const PAGE_SIZE = 100
+
 type AdminUserRow = {
   id: string
   phone?: string | null
@@ -69,7 +71,11 @@ export function UsersPage() {
 
   const load = useCallback(async () => {
     setLoading(true)
-    const { data, error } = await supabase.from('profiles').select('*').order('created_at', { ascending: false })
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id,phone,username,role,status,boost_reason,boosted_until,is_boosted,created_at')
+      .order('created_at', { ascending: false })
+      .limit(PAGE_SIZE)
     if (error) {
       setError(error.message)
       setUsers([])
@@ -80,12 +86,16 @@ export function UsersPage() {
     const baseUsers = (data ?? []) as AdminUserRow[]
     const userIds = baseUsers.map((u) => u.id)
     const [accessRes, creditRes, subRes] = await Promise.all([
-      userIds.length > 0 ? supabase.from('profile_access').select('*').in('user_id', userIds) : Promise.resolve({ data: [] }),
-      userIds.length > 0 ? supabase.from('user_credit_balances').select('*').in('user_id', userIds) : Promise.resolve({ data: [] }),
+      userIds.length > 0
+        ? supabase.from('profile_access').select('user_id,all_profiles_access,contact_quota,contact_quota_used,photo_quota,photo_quota_used').in('user_id', userIds)
+        : Promise.resolve({ data: [] }),
+      userIds.length > 0
+        ? supabase.from('user_credit_balances').select('user_id,contact_credits,photo_credits,premium_credits').in('user_id', userIds)
+        : Promise.resolve({ data: [] }),
       userIds.length > 0
         ? supabase
             .from('user_subscriptions')
-            .select('*')
+            .select('user_id,plan_key,status,ends_at,created_at')
             .in('user_id', userIds)
             .in('status', ['active', 'granted'])
             .order('created_at', { ascending: false })
@@ -125,7 +135,7 @@ export function UsersPage() {
       <PageHeader onRefresh={load} />
       <h1 className="page-title">Utilisateurs</h1>
       <p className="page-subtitle">
-        Comptes disposant d&apos;un profil. Cliquez pour ouvrir profil, activite ou conversations.
+        {users.length} profils recents. Cliquez pour ouvrir profil, activite ou conversations.
       </p>
       {error && <div className="dashboard-message dashboard-message-error" role="alert">{error}</div>}
       <div className="table-wrap">

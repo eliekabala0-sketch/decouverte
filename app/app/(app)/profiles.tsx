@@ -5,9 +5,9 @@ import { useTheme } from '@/theme/ThemeContext'
 import { useAuth } from '@/contexts/AuthContext'
 import { ProfileCard } from '@/components/ProfileCard'
 import { MODES } from '../../../lib/constants'
-import { supabase } from '@/lib/supabase'
 import type { Profile } from '../../../lib/types'
 import { getProfileFeed, type FeedMode } from '../../lib/profileFeedRpc'
+import { useAppFeatureFlags } from '@/lib/useAppFeatureFlags'
 
 const PAGE_SIZE = 20
 
@@ -22,13 +22,13 @@ export default function ProfilesScreen() {
   const router = useRouter()
   const { colors } = useTheme()
   const { profile: myProfile } = useAuth()
+  const { isOn } = useAppFeatureFlags()
   const { mode } = useLocalSearchParams<{ mode?: string }>()
   const [profiles, setProfiles] = useState<Profile[]>([])
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
-  const [reciprocalEnabled, setReciprocalEnabled] = useState(false)
   const [page, setPage] = useState(0)
   const [totalCount, setTotalCount] = useState(0)
   const [hasMore, setHasMore] = useState(false)
@@ -36,6 +36,7 @@ export default function ProfilesScreen() {
 
   const feedMode: FeedMode = mode === 'serieux' ? 'serieux' : 'libre'
   const modeLabel = feedMode === 'serieux' ? MODES.serieux.label : MODES.libre.label
+  const reciprocalEnabled = isOn('reciprocal_matching_enabled')
 
   const loadPage = useCallback(
     async (nextPage: number, replace: boolean) => {
@@ -44,13 +45,6 @@ export default function ProfilesScreen() {
       else setLoadingMore(true)
 
       try {
-        const { data: setting } = await supabase
-          .from('admin_settings')
-          .select('value')
-          .eq('key', 'reciprocal_matching_enabled')
-          .maybeSingle()
-        setReciprocalEnabled(Boolean((setting as { value?: boolean } | null)?.value))
-
         const result = await getProfileFeed(feedMode, nextPage, PAGE_SIZE)
         setFallbackMode(!!result.missingRpc)
         setTotalCount(result.totalCount)

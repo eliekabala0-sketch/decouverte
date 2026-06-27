@@ -30,6 +30,7 @@ export function DashboardHome() {
 
   useEffect(() => {
     const load = async () => {
+      const countMode = 'estimated' as const
       const [
         profiles,
         activeProfiles,
@@ -40,14 +41,14 @@ export function DashboardHome() {
         publications,
         messages,
       ] = await Promise.all([
-        supabase.from('profiles').select('id', { count: 'exact', head: true }),
-        supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('status', 'active'),
-        supabase.from('reports').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
-        supabase.from('payments').select('id', { count: 'exact', head: true }).eq('status', 'completed'),
-        supabase.from('payments').select('id', { count: 'exact', head: true }).eq('provider', 'contact_pack').eq('status', 'completed'),
-        supabase.from('payments').select('id', { count: 'exact', head: true }).eq('provider', 'visibility_boost').eq('status', 'completed'),
-        supabase.from('public_publications').select('id', { count: 'exact', head: true }).eq('is_active', true),
-        supabase.from('messages').select('id', { count: 'exact', head: true }),
+        supabase.from('profiles').select('id', { count: countMode, head: true }),
+        supabase.from('profiles').select('id', { count: countMode, head: true }).eq('status', 'active'),
+        supabase.from('reports').select('id', { count: countMode, head: true }).eq('status', 'pending'),
+        supabase.from('payments').select('id', { count: countMode, head: true }).eq('status', 'completed'),
+        supabase.from('payments').select('id', { count: countMode, head: true }).eq('provider', 'contact_pack').eq('status', 'completed'),
+        supabase.from('payments').select('id', { count: countMode, head: true }).eq('provider', 'visibility_boost').eq('status', 'completed'),
+        supabase.from('public_publications').select('id', { count: countMode, head: true }).eq('is_active', true),
+        supabase.from('messages').select('id', { count: countMode, head: true }),
       ])
       const paid = completedPayments.count ?? 0
       const totalProfiles = profiles.count ?? 0

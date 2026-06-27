@@ -5,13 +5,19 @@ import { GENDER_LABELS } from '@shared/constants'
 import { PageHeader } from '../components/PageHeader'
 import './DashboardPage.css'
 
+const PAGE_SIZE = 150
+
 export function ProfilesPage() {
   const [profiles, setProfiles] = useState<Profile[]>([])
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState<string | null>(null)
 
   const load = useCallback(async () => {
-    const { data } = await supabase.from('profiles').select('*').order('created_at', { ascending: false })
+    const { data } = await supabase
+      .from('profiles')
+      .select('id,username,gender,city,commune,status,created_at')
+      .order('created_at', { ascending: false })
+      .limit(PAGE_SIZE)
     setProfiles((data ?? []) as Profile[])
     setLoading(false)
   }, [])

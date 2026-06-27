@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@lib/supabase'
 import './DashboardPage.css'
 
+const PAGE_SIZE = 150
+
 type PaymentRow = {
   id: string
   user_id?: string
@@ -20,7 +22,11 @@ export function PaymentsPage() {
 
   useEffect(() => {
     const load = async () => {
-      const { data } = await supabase.from('payments').select('*').order('created_at', { ascending: false })
+      const { data } = await supabase
+        .from('payments')
+        .select('id,user_id,type,amount_cents,amount,provider,status,currency,created_at')
+        .order('created_at', { ascending: false })
+        .limit(PAGE_SIZE)
       setPayments((data ?? []) as PaymentRow[])
       setLoading(false)
     }

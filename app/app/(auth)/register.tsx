@@ -21,6 +21,7 @@ export default function RegisterScreen() {
   const [confirmPassword, setConfirmPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [errorText, setErrorText] = useState('')
+  const [progressText, setProgressText] = useState('')
 
   const handleRegister = async () => {
     setErrorText('')
@@ -47,6 +48,10 @@ export default function RegisterScreen() {
     const email = syntheticEmailForSignUp(digitsOnly)
 
     setLoading(true)
+    setProgressText('Creation du compte securisee...')
+    const slowTimer = setTimeout(() => {
+      setProgressText('Connexion au serveur en cours. Vous pouvez patienter, la creation continue.')
+    }, 4500)
     try {
       const { data, error } = await supabase.auth.signUp({
         email,
@@ -86,12 +91,14 @@ export default function RegisterScreen() {
           'Compte créé. Si la confirmation e-mail est activée dans Supabase, vérifiez votre boîte ; sinon vous pouvez continuer.'
         )
       }
+      setProgressText('Compte cree. Preparation du profil...')
       router.replace('/(auth)/create-profile')
     } catch (e) {
       const m = e instanceof Error ? e.message : String(e)
       setErrorText(m)
       Alert.alert('Inscription', m)
     } finally {
+      clearTimeout(slowTimer)
       setLoading(false)
     }
   }
@@ -143,6 +150,9 @@ export default function RegisterScreen() {
         {errorText ? (
           <Text style={[styles.error, { color: colors.error ?? '#ff4d4f' }]}>{errorText}</Text>
         ) : null}
+        {progressText && loading ? (
+          <Text style={[styles.progress, { color: colors.textSecondary }]}>{progressText}</Text>
+        ) : null}
       </View>
       <Pressable onPress={() => router.back()} style={styles.back}>
         <Text style={{ color: colors.textSecondary }}>Retour</Text>
@@ -173,5 +183,6 @@ const styles = StyleSheet.create({
   },
   btnText: { color: '#FFF', fontSize: 17, fontWeight: '600' },
   error: { marginTop: 4, fontSize: 14 },
+  progress: { marginTop: 4, fontSize: 13, lineHeight: 18 },
   back: { position: 'absolute', bottom: 40, alignSelf: 'center' },
 })

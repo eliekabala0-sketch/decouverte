@@ -10,9 +10,16 @@ type AuthContextType = {
   loading: boolean
   signOut: () => Promise<void>
   refreshProfile: () => Promise<void>
+  primeProfile: (nextProfile: Profile | null, nextAccess?: ProfileAccess | null) => void
 }
 
 const AuthContext = createContext<AuthContextType | null>(null)
+
+const PROFILE_SELECT =
+  'id,created_at,phone,photo,gender,city,commune,bio,status,is_verified,username,age,boost_reason,boosted_until,is_boosted,country,role,mode_libre_active,mode_serieux_active'
+
+const PROFILE_ACCESS_SELECT =
+  'user_id,contact_quota,contact_quota_used,updated_at,photo_quota,photo_quota_used,all_profiles_access'
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
@@ -20,54 +27,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profileAccess, setProfileAccess] = useState<ProfileAccess | null>(null)
   const [loading, setLoading] = useState(true)
 
-  /** Évite courses entre refreshProfile ; réinitialisé au logout. */
   const profileChainRef = useRef(Promise.resolve())
-  /** Utilisateur attendu après le dernier événement auth — ignore les fetchs obsolètes (ex. après déconnexion). */
   const expectedUserIdRef = useRef<string | null>(null)
 
   const loadProfilesForUser = useCallback(async (userId: string) => {
-    const profileSelectCore =
-      'id,created_at,phone,photo,gender,city,commune,bio,status,is_verified,username,age,boost_reason,country,role'
-
     const run = async () => {
-      const { data: prof, error: profErr } = await supabase
-        .from('profiles')
-        .select(profileSelectCore)
-        .eq('id', userId)
-        .maybeSingle()
+      const [profileResult, accessResult] = await Promise.all([
+        supabase.from('profiles').select(PROFILE_SELECT).eq('id', userId).maybeSingle(),
+        supabase.from('profile_access').select(PROFILE_ACCESS_SELECT).eq('user_id', userId).maybeSingle(),
+      ])
 
       if (expectedUserIdRef.current !== userId) return
-      if (profErr) {
-        console.warn('[Auth] profiles:', profErr.message)
+
+      if (profileResult.error) {
+        console.warn('[Auth] profiles:', profileResult.error.message)
         setProfile(null)
       } else {
-        let merged = (prof as Profile | null) ?? null
-        if (merged?.id) {
-          const extra = await supabase
-            .from('profiles')
-            .select('boosted_until,is_boosted')
-            .eq('id', userId)
-            .maybeSingle()
-          if (!extra.error && extra.data) {
-            merged = { ...merged, ...(extra.data as Pick<Profile, 'boosted_until' | 'is_boosted'>) }
-          }
-        }
-        setProfile(merged)
+        setProfile((profileResult.data as Profile | null) ?? null)
       }
 
-      const { data: acc, error: accErr } = await supabase
-        .from('profile_access')
-        .select(
-          'user_id,contact_quota,contact_quota_used,updated_at,photo_quota,photo_quota_used,all_profiles_access'
-        )
-        .eq('user_id', userId)
-        .maybeSingle()
       if (expectedUserIdRef.current !== userId) return
-      if (accErr) {
-        console.warn('[Auth] profile_access:', accErr.message)
+
+      if (accessResult.error) {
+        console.warn('[Auth] profile_access:', accessResult.error.message)
         setProfileAccess(null)
       } else {
-        setProfileAccess((acc as ProfileAccess | null) ?? null)
+        setProfileAccess((accessResult.data as ProfileAccess | null) ?? null)
       }
     }
 
@@ -82,10 +67,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await loadProfilesForUser(uid)
   }, [user?.id, loadProfilesForUser])
 
+  const primeProfile = useCallback((nextProfile: Profile | null, nextAccess?: ProfileAccess | null) => {
+    setProfile(nextProfile)
+    if (nextAccess !== undefined) setProfileAccess(nextAccess)
+  }, [])
+
   useEffect(() => {
     let mounted = true
-    // Ne pas await supabase.from / loadProfilesForUser dans ce callback : GoTrue await le callback
-    // pendant que le lock auth est tenu → signOut() reste bloqué et peut timeouter (ex. 6000ms côté lock).
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -122,7 +110,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     expectedUserIdRef.current = null
     profileChainRef.current = Promise.resolve()
     try {
-      // 'local' : nettoie le storage sans attendre l’API revoke (évite blocages réseau / lock prolongé).
       const { error } = await supabase.auth.signOut({ scope: 'local' })
       if (error) console.warn('[Auth] signOut:', error.message)
     } catch (e) {
@@ -135,7 +122,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, profile, profileAccess, loading, signOut, refreshProfile }}>
+    <AuthContext.Provider value={{ user, profile, profileAccess, loading, signOut, refreshProfile, primeProfile }}>
       {children}
     </AuthContext.Provider>
   )

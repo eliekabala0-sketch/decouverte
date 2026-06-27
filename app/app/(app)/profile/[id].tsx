@@ -35,6 +35,7 @@ export default function ProfileDetailScreen() {
   const { user, profile: myProfile, profileAccess, refreshProfile } = useAuth()
   const { isOn } = useAppFeatureFlags()
   const reportOn = isOn('reporting_enabled')
+  const reciprocalEnabled = isOn('reciprocal_matching_enabled')
   const params = useLocalSearchParams<{ id?: string }>()
   const [profile, setProfile] = useState<Profile | null>(null)
   const [loading, setLoading] = useState(!!params.id)
@@ -42,7 +43,6 @@ export default function ProfileDetailScreen() {
   const [reporting, setReporting] = useState(false)
   const [blocking, setBlocking] = useState(false)
   const [photos, setPhotos] = useState<ProfilePhotoRow[]>([])
-  const [reciprocalEnabled, setReciprocalEnabled] = useState(false)
   const [photoAccessReady, setPhotoAccessReady] = useState(false)
   const [photoAccessChecking, setPhotoAccessChecking] = useState(false)
   const [photoAccessMessage, setPhotoAccessMessage] = useState<string | null>(null)
@@ -52,30 +52,14 @@ export default function ProfileDetailScreen() {
   useEffect(() => {
     if (!params.id) return
     const load = async () => {
-      const { data: setting } = await supabase
-        .from('admin_settings')
-        .select('value')
-        .eq('key', 'reciprocal_matching_enabled')
-        .maybeSingle()
-      setReciprocalEnabled(Boolean((setting as { value?: boolean } | null)?.value))
       const core =
-        'id,created_at,gender,city,commune,status,is_verified,username,age,boost_reason,country,role'
+        'id,created_at,gender,city,commune,status,is_verified,username,age,boost_reason,boosted_until,is_boosted,country,role'
       const { data: coreRow, error: coreErr } = await supabase.from('profiles').select(core).eq('id', params.id).single()
       if (coreErr) {
         setProfile(null)
         return
       }
-      let merged = coreRow as Profile | null
-      if (merged?.id) {
-        const extra = await supabase
-          .from('profiles')
-          .select('boosted_until,is_boosted')
-          .eq('id', params.id)
-          .maybeSingle()
-        if (!extra.error && extra.data) {
-          merged = { ...merged, ...(extra.data as Pick<Profile, 'boosted_until' | 'is_boosted'>) }
-        }
-      }
+      const merged = coreRow as Profile | null
       setProfile(merged ? { ...merged, photo: null, bio: null } : null)
       setPhotos([])
       setLoading(false)
@@ -213,13 +197,12 @@ export default function ProfileDetailScreen() {
     try {
       const { data: existing } = await supabase
         .from('conversations')
-        .select('id')
+        .select('id,participant_ids')
         .contains('participant_ids', [user.id])
       const convs = (existing ?? []) as { id: string; participant_ids?: string[] }[]
       let convId: string | null = null
       for (const c of convs) {
-        const full = await supabase.from('conversations').select('participant_ids').eq('id', c.id).single()
-        const ids = (full.data as { participant_ids: string[] } | null)?.participant_ids ?? []
+        const ids = c.participant_ids ?? []
         if (ids.includes(profile.id)) {
           convId = c.id
           break
