@@ -156,7 +156,9 @@ export default function MessagesScreen() {
                 {item.lastContent ?? 'Aucun message'}
               </Text>
               {item.unreadCount > 0 ? (
-                <Text style={[styles.unread, { color: colors.primary }]}>{item.unreadCount} nouveau(x)</Text>
+                <View style={[styles.unreadPill, { backgroundColor: colors.primarySoft }]}>
+                  <Text style={[styles.unread, { color: colors.primary }]}>{item.unreadCount} nouveau(x)</Text>
+                </View>
               ) : null}
             </View>
             <Text style={[styles.rowDate, { color: colors.textMuted }]}>
@@ -192,7 +194,8 @@ const styles = StyleSheet.create({
   rowContent: { flex: 1, marginRight: 12 },
   rowName: { fontSize: 17, fontWeight: '600', marginBottom: 4 },
   rowPreview: { fontSize: 14 },
-  unread: { fontSize: 12, marginTop: 4, fontWeight: '700' },
+  unreadPill: { alignSelf: 'flex-start', marginTop: 6, paddingVertical: 4, paddingHorizontal: 8, borderRadius: 999 },
+  unread: { fontSize: 12, fontWeight: '700' },
   rowDate: { fontSize: 12 },
   empty: { textAlign: 'center', marginTop: 48, paddingHorizontal: 24 },
   retryBtn: { marginTop: 16, paddingVertical: 12, paddingHorizontal: 24, borderRadius: 12, alignSelf: 'center' },

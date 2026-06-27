@@ -14,6 +14,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router'
 import { useTheme } from '@/theme/ThemeContext'
 import { useAuth } from '@/contexts/AuthContext'
 import { supabase } from '@/lib/supabase'
+import { markConversationRead } from '@/lib/conversationRpc'
 import type { Message } from '../../../../lib/types'
 
 export default function ConversationScreen() {
@@ -32,12 +33,11 @@ export default function ConversationScreen() {
 
   const markConversationAsRead = useCallback(async () => {
     if (!id || !user?.id) return
-    await supabase
-      .from('messages')
-      .update({ read_at: new Date().toISOString() })
-      .eq('conversation_id', id)
-      .neq('sender_id', user.id)
-      .is('read_at', null)
+    try {
+      await markConversationRead(id)
+    } catch (e) {
+      console.warn('[conversation] mark read failed', e instanceof Error ? e.message : e)
+    }
   }, [id, user?.id])
 
   useEffect(() => {

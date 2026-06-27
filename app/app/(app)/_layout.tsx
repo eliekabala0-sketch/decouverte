@@ -2,12 +2,14 @@ import { Redirect, Tabs } from 'expo-router'
 import { useTheme } from '@/theme/ThemeContext'
 import { useAuth } from '@/contexts/AuthContext'
 import { useAppFeatureFlags } from '@/lib/useAppFeatureFlags'
+import { useNotificationCounters } from '@/lib/useNotificationCounters'
 import { Ionicons } from '@expo/vector-icons'
 
 export default function AppLayout() {
   const { colors } = useTheme()
   const { user, profile, loading } = useAuth()
   const { isOn } = useAppFeatureFlags()
+  const { unreadMessages, newPublications } = useNotificationCounters()
 
   if (!loading && !user) return <Redirect href="/(auth)/welcome" />
   if (!loading && user && !profile) return <Redirect href="/(auth)/create-profile" />
@@ -46,6 +48,7 @@ export default function AppLayout() {
         name="messages"
         options={{
           title: 'Messages',
+          tabBarBadge: unreadMessages > 0 ? unreadMessages : undefined,
           tabBarIcon: ({ color, size }) => <Ionicons name="chatbubbles" size={size} color={color} />,
         }}
       />
@@ -54,6 +57,7 @@ export default function AppLayout() {
         options={{
           title: 'Publications',
           href: showPublications ? undefined : null,
+          tabBarBadge: newPublications > 0 ? newPublications : undefined,
           tabBarIcon: ({ color, size }) => <Ionicons name="newspaper" size={size} color={color} />,
         }}
       />

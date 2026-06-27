@@ -54,7 +54,7 @@ export default function PublicationsScreen() {
         p.image_url,
         (w, h) => {
           if (w > 0 && h > 0) {
-            setRatios((prev) => ({ ...prev, [p.id]: Math.max(0.6, Math.min(1.6, w / h)) }))
+            setRatios((prev) => ({ ...prev, [p.id]: Math.max(0.65, Math.min(1.7, w / h)) }))
           }
         },
         () => setRatios((prev) => ({ ...prev, [p.id]: 1 }))
@@ -63,8 +63,7 @@ export default function PublicationsScreen() {
   }, [publications, ratios])
 
   useEffect(() => {
-    if (!user?.id || !pubsOn) return
-    if (publications.length === 0) return
+    if (!user?.id || !pubsOn || publications.length === 0) return
     const latest = publications[0]?.created_at
     if (!latest) return
     void supabase
@@ -83,10 +82,7 @@ export default function PublicationsScreen() {
     void load()
   }
 
-  const headerSubtitle = useMemo(
-    () => 'Publications publiques — épinglées en premier',
-    []
-  )
+  const headerSubtitle = useMemo(() => 'Publications publiques, epinglees en premier', [])
 
   if (loading) {
     return (
@@ -100,7 +96,7 @@ export default function PublicationsScreen() {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
         <Text style={[styles.title, { color: colors.text }]}>Publications</Text>
-        <Text style={[styles.subtitle, { color: colors.textMuted }]}>Module désactivé dans l’administration.</Text>
+        <Text style={[styles.subtitle, { color: colors.textMuted }]}>Module desactive dans l'administration.</Text>
       </View>
     )
   }
@@ -108,12 +104,8 @@ export default function PublicationsScreen() {
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <Text style={[styles.title, { color: colors.text }]}>Publications</Text>
-      <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-        {headerSubtitle}
-      </Text>
-      {loadError ? (
-        <Text style={[styles.error, { color: colors.error }]}>{loadError}</Text>
-      ) : null}
+      <Text style={[styles.subtitle, { color: colors.textSecondary }]}>{headerSubtitle}</Text>
+      {loadError ? <Text style={[styles.error, { color: colors.error }]}>{loadError}</Text> : null}
       <FlatList
         data={publications}
         keyExtractor={(item) => item.id}
@@ -121,11 +113,11 @@ export default function PublicationsScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
         renderItem={({ item }) => (
           <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            {item.is_pinned && (
+            {item.is_pinned ? (
               <View style={[styles.pinBadge, { backgroundColor: colors.primary }]}>
-                <Text style={styles.pinText}>Épinglé</Text>
+                <Text style={styles.pinText}>Epingle</Text>
               </View>
-            )}
+            ) : null}
             <Text style={[styles.cardTitle, { color: colors.text }]}>{item.title}</Text>
             <Text style={[styles.cardContent, { color: colors.textSecondary }]}>{item.content}</Text>
             {item.content_type === 'image' && item.image_url ? (
@@ -142,7 +134,7 @@ export default function PublicationsScreen() {
                 style={[styles.videoLink, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}
                 onPress={() => Linking.openURL(item.video_url!)}
               >
-                <Text style={[styles.videoLinkText, { color: colors.primary }]}>▶ Lire la vidéo</Text>
+                <Text style={[styles.videoLinkText, { color: colors.primary }]}>Lire la video</Text>
               </Pressable>
             ) : null}
             <Text style={[styles.cardDate, { color: colors.textMuted }]}>
@@ -180,7 +172,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   pinText: { color: '#fff', fontSize: 11, fontWeight: '600' },
-  cardTitle: { fontSize: 18, fontWeight: '700', marginBottom: 8 },
+  cardTitle: { fontSize: 18, fontWeight: '700', marginBottom: 8, paddingRight: 72 },
   cardContent: { fontSize: 15, lineHeight: 22, marginBottom: 12 },
   mediaWrap: {
     width: '100%',
@@ -188,6 +180,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     marginBottom: 12,
     overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   media: { width: '100%', maxHeight: 420 },
   videoLink: {

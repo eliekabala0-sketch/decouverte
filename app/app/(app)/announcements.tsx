@@ -7,26 +7,33 @@ import { supabase } from '@/lib/supabase'
 import { canViewFullProfiles, remainingContacts } from '../../../lib/access'
 import type { MassMessage, ProfileAccess } from '../../../lib/types'
 
+function normalizeGender(gender?: string | null) {
+  const value = String(gender ?? '').trim().toLowerCase()
+  if (['m', 'male', 'man', 'homme', 'h'].includes(value)) return 'M'
+  if (['f', 'female', 'woman', 'femme'].includes(value)) return 'F'
+  return gender ?? 'other'
+}
+
 function matchesSegment(
   msg: MassMessage,
   profile: { gender: string; city: string; commune: string | null } | null,
-  profileAccess: ProfileAccess | null
+  profileAccess: ProfileAccess | null,
 ): boolean {
   if (!profile) return msg.segment === 'all'
+  const gender = normalizeGender(profile.gender)
   if (msg.segment === 'all') return true
-  if (msg.segment === 'men' && profile.gender === 'M') return true
-  if (msg.segment === 'women' && profile.gender === 'F') return true
+  if (msg.segment === 'men' && gender === 'M') return true
+  if (msg.segment === 'women' && gender === 'F') return true
   if (msg.segment === 'paying') {
-    const hasAccess = canViewFullProfiles(profile.gender as 'M' | 'F', profileAccess) || remainingContacts(profileAccess) > 0
+    const hasAccess = canViewFullProfiles(gender, profileAccess) || remainingContacts(profileAccess) > 0
     return !!hasAccess
   }
   if (msg.segment === 'non_paying') {
-    const hasAccess = canViewFullProfiles(profile.gender as 'M' | 'F', profileAccess) || remainingContacts(profileAccess) > 0
+    const hasAccess = canViewFullProfiles(gender, profileAccess) || remainingContacts(profileAccess) > 0
     return !hasAccess
   }
   if (msg.segment === 'city' && msg.segment_value) return profile.city === msg.segment_value
   if (msg.segment === 'commune' && msg.segment_value) return (profile.commune ?? '') === msg.segment_value
-  // Segments hérités (plus de colonnes mode_* sur profiles) : traités comme diffusion large
   if (msg.segment === 'mode_libre' || msg.segment === 'mode_serieux') return true
   return false
 }
@@ -58,7 +65,7 @@ export default function AnnouncementsScreen() {
       setLoading(false)
     }
     void load()
-  }, [profile?.id, profileAccess?.user_id, massOn])
+  }, [profile?.id, profile?.gender, profileAccess?.user_id, massOn])
 
   useEffect(() => {
     if (!user?.id || !massOn || loading) return
@@ -84,9 +91,7 @@ export default function AnnouncementsScreen() {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
         <Text style={[styles.title, { color: colors.text }]}>Annonces</Text>
-        <Text style={[styles.subtitle, { color: colors.textMuted }]}>
-          Module désactivé dans l’administration.
-        </Text>
+        <Text style={[styles.subtitle, { color: colors.textMuted }]}>Module desactive dans l'administration.</Text>
       </View>
     )
   }
@@ -94,9 +99,7 @@ export default function AnnouncementsScreen() {
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <Text style={[styles.title, { color: colors.text }]}>Annonces</Text>
-      <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-        Messages envoyés par l'équipe Découverte
-      </Text>
+      <Text style={[styles.subtitle, { color: colors.textSecondary }]}>Messages envoyes par l'equipe Decouverte</Text>
       <FlatList
         data={messages}
         keyExtractor={(item) => item.id}
@@ -106,14 +109,16 @@ export default function AnnouncementsScreen() {
             <Text style={[styles.cardTitle, { color: colors.text }]}>{item.title}</Text>
             <Text style={[styles.cardBody, { color: colors.textSecondary }]}>{item.body}</Text>
             {item.content_type === 'image' && item.image_url ? (
-              <Image source={{ uri: item.image_url }} style={styles.media} resizeMode="cover" />
+              <View style={[styles.mediaWrap, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+                <Image source={{ uri: item.image_url }} style={styles.media} resizeMode="contain" />
+              </View>
             ) : null}
             {item.content_type === 'video' && item.video_url ? (
               <Pressable
                 style={[styles.videoBtn, { backgroundColor: colors.surfaceElevated }]}
                 onPress={() => Linking.openURL(item.video_url!)}
               >
-                <Text style={[styles.videoBtnText, { color: colors.primary }]}>▶ Voir la vidéo</Text>
+                <Text style={[styles.videoBtnText, { color: colors.primary }]}>Voir la video</Text>
               </Pressable>
             ) : null}
             <Text style={[styles.date, { color: colors.textMuted }]}>
@@ -143,7 +148,17 @@ const styles = StyleSheet.create({
   },
   cardTitle: { fontSize: 18, fontWeight: '700', marginBottom: 8 },
   cardBody: { fontSize: 15, lineHeight: 22, marginBottom: 12 },
-  media: { width: '100%', height: 200, borderRadius: 12, marginBottom: 12 },
+  mediaWrap: {
+    width: '100%',
+    height: 220,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 12,
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  media: { width: '100%', height: '100%' },
   videoBtn: { padding: 12, borderRadius: 12, marginBottom: 12, alignItems: 'center' },
   videoBtnText: { fontSize: 15, fontWeight: '600' },
   date: { fontSize: 13 },
