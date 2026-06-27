@@ -5,9 +5,11 @@ import { AdminAuthProvider } from './contexts/AdminAuthContext'
 import App from './App'
 import './index.css'
 
+const basename = import.meta.env.VITE_ADMIN_BASENAME || '/'
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <BrowserRouter>
+    <BrowserRouter basename={basename}>
       <AdminAuthProvider>
         <App />
       </AdminAuthProvider>

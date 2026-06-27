@@ -2,7 +2,17 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@lib/supabase'
 import './DashboardPage.css'
 
-type PaymentRow = { id: string; user_id: string; type: string; amount_cents: number; status: string; created_at: string }
+type PaymentRow = {
+  id: string
+  user_id?: string
+  type?: string | null
+  amount_cents?: number | null
+  amount?: number | null
+  provider?: string | null
+  status?: string | null
+  currency?: string | null
+  created_at: string
+}
 
 export function PaymentsPage() {
   const [payments, setPayments] = useState<PaymentRow[]>([])
@@ -39,9 +49,15 @@ export function PaymentsPage() {
             )}
             {payments.map((p) => (
               <tr key={p.id}>
-                <td>{p.type}</td>
-                <td>{(p.amount_cents / 100).toFixed(2)} USD</td>
-                <td>{p.status}</td>
+                <td>{p.type ?? p.provider ?? '—'}</td>
+                <td>
+                  {typeof p.amount_cents === 'number'
+                    ? `${(p.amount_cents / 100).toFixed(2)} ${p.currency ?? 'USD'}`
+                    : typeof p.amount === 'number'
+                      ? `${p.amount} ${p.currency ?? 'USD'}`
+                      : '—'}
+                </td>
+                <td>{p.status ?? '—'}</td>
                 <td>{new Date(p.created_at).toLocaleString('fr-FR')}</td>
               </tr>
             ))}

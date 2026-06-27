@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+﻿import { useEffect, useState } from 'react'
 import { View, Text, StyleSheet, ScrollView, Pressable, Alert, ActivityIndicator } from 'react-native'
 import { useRouter } from 'expo-router'
 import { useTheme } from '@/theme/ThemeContext'
@@ -11,8 +11,7 @@ import {
   PAYMENT_PROVIDER_VISIBILITY_BOOST,
   VISIBILITY_BOOST_TIERS,
 } from '../../../lib/constants'
-import { extendBoostedUntil, formatBoostStatusLabel } from '../../../lib/boostVisibility'
-import type { Profile } from '../../../lib/types'
+import { formatBoostStatusLabel } from '../../../lib/boostVisibility'
 
 type BoostTier = { days: number; label: string; amount: number }
 
@@ -116,31 +115,18 @@ export default function PaymentsScreen() {
         payment_provider: 'Badiboss Pay',
         provider: 'profiles_access',
         transaction_ref: makeTransactionRef('profiles'),
-        status: 'completed',
-      })
-      if (payErr) throw new Error(payErr.message || payErr.code || 'Échec enregistrement paiement')
-
-      const currentQuota = profileAccess?.contact_quota ?? 0
-      const currentUsed = profileAccess?.contact_quota_used ?? 0
-      const pq = profileAccess?.photo_quota ?? 0
-      const pu = profileAccess?.photo_quota_used ?? 0
-      const { error } = await supabase.from('profile_access').upsert(
-        {
-          user_id: user.id,
-          contact_quota: currentQuota,
-          contact_quota_used: currentUsed,
-          photo_quota: pq + 100,
-          photo_quota_used: pu,
+        status: 'pending',
+        metadata: {
+          photo_quota: 100,
           all_profiles_access: true,
-          updated_at: new Date().toISOString(),
         },
-        { onConflict: 'user_id' }
-      )
-      if (error) throw new Error(error.message || error.code || 'Échec mise à jour accès profil')
+      })
+      if (payErr) throw new Error(payErr.message || payErr.code || 'Ã‰chec enregistrement paiement')
+
       await refreshProfile()
-      Alert.alert('Accès activé', 'Accès profils/photos activé (simulation paiement).')
+      Alert.alert('Commande crÃ©Ã©e', 'AprÃ¨s confirmation Badiboss Pay, lâ€™accÃ¨s sera activÃ© automatiquement par le serveur.')
     } catch (e: unknown) {
-      Alert.alert('Paiement', e instanceof Error ? e.message : "Impossible d'activer l'accès.")
+      Alert.alert('Paiement', e instanceof Error ? e.message : "Impossible d'activer l'accÃ¨s.")
     }
   }
 
@@ -161,18 +147,23 @@ export default function PaymentsScreen() {
           provider: PAYMENT_PROVIDER_VISIBILITY_BOOST,
           transaction_ref: makeTransactionRef('boost'),
           status: 'pending',
+          metadata: {
+            days: tier.days,
+            label: tier.label,
+            amount: tier.amount,
+          },
         })
         .select('id')
         .single()
-      if (error) throw new Error(error.message || error.code || 'Échec création commande boost')
+      if (error) throw new Error(error.message || error.code || 'Ã‰chec crÃ©ation commande boost')
       const id = (data as { id: string }).id
       setBoostPendingId(id)
       Alert.alert(
-        'Commande créée',
-        `Montant : ${formatUsd(tier.amount)}. Après paiement sur Badiboss Pay, appuyez sur « Confirmer le paiement ».`
+        'Commande crÃ©Ã©e',
+        `Montant : ${formatUsd(tier.amount)}. AprÃ¨s paiement sur Badiboss Pay, appuyez sur Â« Confirmer le paiement Â».`
       )
     } catch (e: unknown) {
-      Alert.alert('Boost', e instanceof Error ? e.message : 'Impossible de créer la commande.')
+      Alert.alert('Boost', e instanceof Error ? e.message : 'Impossible de crÃ©er la commande.')
     } finally {
       setBoostBusy(false)
     }
@@ -194,39 +185,19 @@ export default function PaymentsScreen() {
         provider?: string | null
         payment_provider?: string | null
       } | null
-      if (!row || row.status !== 'pending') {
+      if (!row || (row.status !== 'pending' && row.status !== 'completed')) {
         throw new Error('Aucune commande boost en attente pour ce compte.')
       }
       if (row.provider !== PAYMENT_PROVIDER_VISIBILITY_BOOST || row.payment_provider !== 'Badiboss Pay') {
-        throw new Error('Cette commande n’est pas une mise en avant valide.')
+        throw new Error('Cette commande nâ€™est pas une mise en avant valide.')
       }
-      const days = boostTiers[boostTierIdx]?.days ?? boostTiers[0]?.days ?? 7
-
-      const { error: upPay } = await supabase
-        .from('payments')
-        .update({ status: 'completed' })
-        .eq('id', boostPendingId)
-        .eq('user_id', user.id)
-        .eq('status', 'pending')
-      if (upPay) throw new Error(upPay.message || 'Impossible de valider le paiement (droits RLS ?).')
-
-      const newUntil = extendBoostedUntil(profile as Profile, days)
-      const patch: Record<string, unknown> = {
-        boosted_until: newUntil,
-        is_boosted: true,
-      }
-      if (!profile.boost_reason?.trim()) {
-        patch.boost_reason = 'paid'
-      }
-      const { error: prErr } = await supabase.from('profiles').update(patch).eq('id', profile.id)
-      if (prErr) throw new Error(prErr.message || 'Mise à jour profil impossible (colonnes boost ?).')
-
-      setBoostPendingId(null)
       await refreshProfile()
-      Alert.alert(
-        'Boost activé',
-        `Mise en avant enregistrée jusqu’au ${new Date(newUntil).toLocaleDateString('fr-FR')}.`
-      )
+      if (row.status === 'completed') {
+        setBoostPendingId(null)
+        Alert.alert('Boost activÃ©', 'Le paiement a Ã©tÃ© confirmÃ© par le serveur.')
+      } else {
+        Alert.alert('Paiement en attente', 'La confirmation Badiboss Pay nâ€™est pas encore reÃ§ue par le serveur.')
+      }
     } catch (e: unknown) {
       Alert.alert('Boost', e instanceof Error ? e.message : 'Confirmation impossible.')
     } finally {
@@ -249,12 +220,12 @@ export default function PaymentsScreen() {
       >
         <Text style={[styles.cardTitle, { color: c.text }]}>Mise en avant publicitaire (boost)</Text>
         <Text style={[styles.cardDesc, { color: c.textSecondary }]}>
-          Campagne payante : choisissez la durée, créez la commande, payez sur Badiboss, puis confirmez ici pour
-          activer la visibilité (listes + badge). Aucune activation sans confirmation de paiement.
+          Campagne payante : choisissez la durÃ©e, crÃ©ez la commande, payez sur Badiboss, puis confirmez ici pour
+          activer la visibilitÃ© (listes + badge). Aucune activation sans confirmation de paiement.
         </Text>
-        <Text style={[styles.status, { color: c.textMuted }]}>État : {formatBoostStatusLabel(profile)}</Text>
+        <Text style={[styles.status, { color: c.textMuted }]}>Ã‰tat : {formatBoostStatusLabel(profile)}</Text>
 
-        <Text style={[styles.tierLabel, { color: c.text }]}>Durée</Text>
+        <Text style={[styles.tierLabel, { color: c.text }]}>DurÃ©e</Text>
         <View style={styles.tierRow}>
           {boostTiers.map((t, i) => (
             <Pressable
@@ -274,13 +245,13 @@ export default function PaymentsScreen() {
           ))}
         </View>
         <Text style={[styles.priceLine, { color: c.text }]}>
-          Total à payer : {formatUsd(tier.amount)} — {tier.label}
+          Total Ã  payer : {formatUsd(tier.amount)} â€” {tier.label}
         </Text>
 
         {boostPendingId ? (
           <View style={{ gap: 10 }}>
             <Text style={[styles.cardDesc, { color: c.warning }]}>
-              Commande en attente de paiement. Après Badiboss Pay, confirmez pour activer le boost.
+              Commande en attente de paiement. AprÃ¨s Badiboss Pay, confirmez pour activer le boost.
             </Text>
             <Pressable
               onPress={confirmBoostPayment}
@@ -290,7 +261,7 @@ export default function PaymentsScreen() {
               {boostBusy ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <Text style={styles.btnText}>Confirmer le paiement (après Badiboss)</Text>
+                <Text style={styles.btnText}>Confirmer le paiement (aprÃ¨s Badiboss)</Text>
               )}
             </Pressable>
           </View>
@@ -303,7 +274,7 @@ export default function PaymentsScreen() {
             {boostBusy ? (
               <ActivityIndicator color="#fff" />
             ) : (
-              <Text style={styles.btnText}>Créer la commande et payer sur Badiboss</Text>
+              <Text style={styles.btnText}>CrÃ©er la commande et payer sur Badiboss</Text>
             )}
           </Pressable>
         )}
@@ -322,18 +293,18 @@ export default function PaymentsScreen() {
 
       {requiresProfilesPayment ? (
         <View style={[styles.card, { backgroundColor: c.surface }]}>
-          <Text style={[styles.cardTitle, { color: c.text }]}>Accès profils / photos</Text>
+          <Text style={[styles.cardTitle, { color: c.text }]}>AccÃ¨s profils / photos</Text>
           <Text style={[styles.cardDesc, { color: c.textSecondary }]}>
             {profile?.gender === 'F' && reciprocal
-              ? 'Mode réciproque : même logique d’accès payant que pour les hommes pour voir les profils du genre recherché.'
-              : 'Débloquez l’affichage complet via quota photo premium ou pack (voir profile_access).'}
+              ? 'Mode rÃ©ciproque : mÃªme logique dâ€™accÃ¨s payant que pour les hommes pour voir les profils du genre recherchÃ©.'
+              : 'DÃ©bloquez lâ€™affichage complet via quota photo premium ou pack (voir profile_access).'}
           </Text>
           {profile ? (
             <Text style={[styles.status, { color: hasProfilesAccess ? c.success : c.textMuted }]}>
               {hasProfilesAccess
                 ? profileAccess?.all_profiles_access
-                  ? 'Accès premium actif'
-                  : `Quota photos utilisé : ${profileAccess?.photo_quota_used ?? 0} / ${profileAccess?.photo_quota ?? 0}`
+                  ? 'AccÃ¨s premium actif'
+                  : `Quota photos utilisÃ© : ${profileAccess?.photo_quota_used ?? 0} / ${profileAccess?.photo_quota ?? 0}`
                 : 'Non actif'}
             </Text>
           ) : null}
@@ -343,10 +314,10 @@ export default function PaymentsScreen() {
         </View>
       ) : profile?.gender === 'F' ? (
         <View style={[styles.card, { backgroundColor: c.surface }]}>
-          <Text style={[styles.cardTitle, { color: c.text }]}>Accès profils / photos</Text>
+          <Text style={[styles.cardTitle, { color: c.text }]}>AccÃ¨s profils / photos</Text>
           <Text style={[styles.cardDesc, { color: c.textSecondary }]}>
-            Sans réciprocité, vous n’achetez pas l’accès « type homme ». Utilisez la mise en avant ci-dessus pour la
-            visibilité.
+            Sans rÃ©ciprocitÃ©, vous nâ€™achetez pas lâ€™accÃ¨s Â« type homme Â». Utilisez la mise en avant ci-dessus pour la
+            visibilitÃ©.
           </Text>
         </View>
       ) : null}
@@ -355,7 +326,7 @@ export default function PaymentsScreen() {
         <View style={[styles.card, { backgroundColor: c.surface }]}>
           <Text style={[styles.cardTitle, { color: c.text }]}>Packs contacts</Text>
           <Text style={[styles.cardDesc, { color: c.textSecondary }]}>
-            Quotas contacts + options photo selon le pack (parcours homme, ou femme si réciprocité activée).
+            Quotas contacts + options photo selon le pack (parcours homme, ou femme si rÃ©ciprocitÃ© activÃ©e).
           </Text>
           <Text style={[styles.status, { color: contactsLeft > 0 ? c.textSecondary : c.warning }]}>
             {contactsLeft > 0 ? `Contacts restants : ${contactsLeft}` : 'Quota atteint : achat requis'}

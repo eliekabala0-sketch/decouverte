@@ -14,10 +14,11 @@ import { useTheme } from '@/theme/ThemeContext'
 import { useAuth } from '@/contexts/AuthContext'
 import { useAppFeatureFlags } from '@/lib/useAppFeatureFlags'
 import { GENDER_LABELS } from '../../../../lib/constants'
-import { canUnlockContact, canViewFullProfiles, remainingContacts } from '../../../../lib/access'
+import { canViewFullProfiles, remainingContacts } from '../../../../lib/access'
 import { supabase } from '@/lib/supabase'
 import type { Profile } from '../../../../lib/types'
 import { listProfilePhotos, type ProfilePhotoRow } from '../../../lib/profilePhotos'
+import { unlockProfileContact, unlockProfilePhoto } from '../../../lib/profileAccessRpc'
 
 export default function ProfileDetailScreen() {
   const router = useRouter()
@@ -32,6 +33,9 @@ export default function ProfileDetailScreen() {
   const [reporting, setReporting] = useState(false)
   const [photos, setPhotos] = useState<ProfilePhotoRow[]>([])
   const [reciprocalEnabled, setReciprocalEnabled] = useState(false)
+  const [photoAccessReady, setPhotoAccessReady] = useState(false)
+  const [photoAccessChecking, setPhotoAccessChecking] = useState(false)
+  const [photoAccessMessage, setPhotoAccessMessage] = useState<string | null>(null)
 
   const canViewFull = canViewFullProfiles(myProfile?.gender, profileAccess)
 
@@ -76,6 +80,60 @@ export default function ProfileDetailScreen() {
     load()
   }, [params.id])
 
+  useEffect(() => {
+    if (!user?.id || !profile?.id) {
+      setPhotoAccessReady(false)
+      setPhotoAccessChecking(false)
+      setPhotoAccessMessage(null)
+      return
+    }
+
+    const canUseLegacyAccess =
+      user.id === profile.id ||
+      (canViewFull &&
+        !(
+          myProfile?.gender === 'F' &&
+          profile.gender === 'M' &&
+          !reciprocalEnabled
+        ))
+
+    if (!canUseLegacyAccess) {
+      setPhotoAccessReady(false)
+      setPhotoAccessChecking(false)
+      setPhotoAccessMessage(null)
+      return
+    }
+
+    if (user.id === profile.id) {
+      setPhotoAccessReady(true)
+      setPhotoAccessChecking(false)
+      setPhotoAccessMessage(null)
+      return
+    }
+
+    let cancelled = false
+    setPhotoAccessChecking(true)
+    setPhotoAccessMessage(null)
+    void unlockProfilePhoto(profile.id, 'global')
+      .then((res) => {
+        if (cancelled) return
+        if (res.ok || res.missingRpc) {
+          setPhotoAccessReady(true)
+          setPhotoAccessMessage(null)
+        } else {
+          setPhotoAccessReady(false)
+          setPhotoAccessMessage(res.message ?? 'Acces photo non autorise.')
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setPhotoAccessChecking(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [user?.id, profile?.id, profile?.gender, myProfile?.gender, canViewFull, reciprocalEnabled])
+
   if (!params.id) {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -110,6 +168,7 @@ export default function ProfileDetailScreen() {
   const contactsLeft = remainingContacts(profileAccess)
   const canViewTargetFull =
     canViewFull &&
+    photoAccessReady &&
     !(
       myProfile?.gender === 'F' &&
       profile.gender === 'M' &&
@@ -118,10 +177,6 @@ export default function ProfileDetailScreen() {
 
   const openConversation = async () => {
     if (!user?.id || !profile) return
-    if (!canUnlockContact(profileAccess)) {
-      router.push('/(app)/packs')
-      return
-    }
     setOpeningChat(true)
     try {
       const { data: existing } = await supabase
@@ -139,7 +194,10 @@ export default function ProfileDetailScreen() {
         }
       }
       if (!convId) {
-        const currentUsed = profileAccess?.contact_quota_used ?? 0
+        const unlock = await unlockProfileContact(profile.id, 'global')
+        if (!unlock.ok && !unlock.missingRpc) {
+          throw new Error(unlock.message || 'Acces contact non autorise.')
+        }
         const { data: newConv, error: createErr } = await supabase
           .from('conversations')
           .insert({
@@ -149,18 +207,26 @@ export default function ProfileDetailScreen() {
           .single()
         if (createErr) throw createErr
         convId = (newConv as { id: string }).id
-        await supabase
-          .from('profile_access')
-          .update({
-            contact_quota_used: currentUsed + 1,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('user_id', user.id)
+        if (unlock.missingRpc) {
+          const currentUsed = profileAccess?.contact_quota_used ?? 0
+          await supabase
+            .from('profile_access')
+            .update({
+              contact_quota_used: currentUsed + 1,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('user_id', user.id)
+        }
         await refreshProfile()
       }
       if (convId) router.push({ pathname: '/(app)/conversation/[id]', params: { id: convId } })
     } catch (e: any) {
-      Alert.alert('Erreur', e?.message ?? 'Impossible d\'ouvrir la conversation.')
+      const message = e?.message ?? 'Impossible d\'ouvrir la conversation.'
+      if (String(message).toLowerCase().includes('quota')) {
+        router.push('/(app)/packs')
+        return
+      }
+      Alert.alert('Erreur', message)
     } finally {
       setOpeningChat(false)
     }
@@ -217,6 +283,9 @@ export default function ProfileDetailScreen() {
       ) : null}
       {canViewTargetFull ? (
         <>
+          {photoAccessChecking ? (
+            <ActivityIndicator color={colors.primary} style={{ marginBottom: 16 }} />
+          ) : null}
           {profile.photo ? (
             <Image source={{ uri: profile.photo }} style={styles.heroPhoto} resizeMode="cover" />
           ) : null}
@@ -244,7 +313,7 @@ export default function ProfileDetailScreen() {
             </Text>
             <Pressable
               onPress={openConversation}
-              disabled={openingChat || !canUnlockContact(profileAccess)}
+              disabled={openingChat}
               style={[styles.ctaBtn, { backgroundColor: colors.primary, marginTop: 12 }]}
             >
               <Text style={styles.ctaBtnText}>
@@ -263,7 +332,7 @@ export default function ProfileDetailScreen() {
             {profile.age} ans • {profile.city}, {profile.commune ?? '—'}
           </Text>
           <Text style={[styles.lockHint, { color: colors.textMuted }]}>
-            Débloquez l'accès pour voir les photos et le profil complet
+            {photoAccessMessage ?? "Débloquez l'accès pour voir les photos et le profil complet"}
           </Text>
           <Pressable
             onPress={() => router.push('/(app)/payments')}

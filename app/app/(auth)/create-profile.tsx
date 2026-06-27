@@ -59,6 +59,8 @@ export default function CreateProfileScreen() {
   const [city, setCity] = useState('')
   const [commune, setCommune] = useState('')
   const [bio, setBio] = useState('')
+  const [modeLibre, setModeLibre] = useState(true)
+  const [modeSerieux, setModeSerieux] = useState(false)
   const [loading, setLoading] = useState(false)
   const [errorText, setErrorText] = useState('')
   const [picker, setPicker] = useState<null | 'year' | 'month' | 'day'>(null)
@@ -134,9 +136,13 @@ export default function CreateProfileScreen() {
       setErrorText('Ville et commune sont requis.')
       return
     }
+    if (!modeLibre && !modeSerieux) {
+      setErrorText('Choisissez au moins un mode (Libre, Sérieux, ou les deux).')
+      return
+    }
     setLoading(true)
     try {
-      const payload = {
+      const payloadBase = {
         id: user.id,
         phone,
         username: username.trim(),
@@ -152,8 +158,22 @@ export default function CreateProfileScreen() {
         photo: null as string | null,
         boost_reason: null as string | null,
       }
-      dbg(`Colonnes: ${Object.keys(payload).join(', ')}`)
-      const insertPromise = supabase.from('profiles').insert(payload)
+      const payloadWithModes = {
+        ...payloadBase,
+        mode_libre_active: modeLibre,
+        mode_serieux_active: modeSerieux,
+      }
+      dbg(`Colonnes: ${Object.keys(payloadWithModes).join(', ')}`)
+      const insertPromise = (async () => {
+        const first = await supabase.from('profiles').insert(payloadWithModes)
+        if (!first.error) return first
+        const msg = (first.error.message || '').toLowerCase()
+        const missingModeCols = msg.includes('mode_libre_active') || msg.includes('mode_serieux_active')
+        if (missingModeCols && msg.includes('could not find')) {
+          return await supabase.from('profiles').insert(payloadBase)
+        }
+        return first
+      })()
       const timeoutMs = 12000
       const res = await Promise.race([
         insertPromise,
@@ -328,6 +348,30 @@ export default function CreateProfileScreen() {
         onChangeText={setBio}
         multiline
       />
+
+      <Text style={[styles.label, { color: colors.textSecondary }]}>Mode de rencontre *</Text>
+      <View style={styles.rowWrap}>
+        <Pressable
+          onPress={() => setModeLibre((v) => !v)}
+          style={[
+            styles.chip,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+            modeLibre && { borderColor: colors.primary, backgroundColor: colors.primarySoft },
+          ]}
+        >
+          <Text style={[styles.chipText, { color: colors.text }]}>Mode Libre</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => setModeSerieux((v) => !v)}
+          style={[
+            styles.chip,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+            modeSerieux && { borderColor: colors.primary, backgroundColor: colors.primarySoft },
+          ]}
+        >
+          <Text style={[styles.chipText, { color: colors.text }]}>Mode Sérieux</Text>
+        </Pressable>
+      </View>
 
       <Pressable
         onPress={handleSubmit}

@@ -1,134 +1,238 @@
--- Découverte - Schéma Supabase
--- Exécuter dans l'éditeur SQL Supabase
+-- Découverte - schéma de référence Supabase
 --
--- Règles métier reflétées dans ce schéma :
--- - Homme (M) : accès aux profils/photos conditionné par paiement (profiles_access_until).
--- - Femme (F) : inscription libre ; accès aux profils/photos non conditionné par paiement 1.
--- - Mode Libre / Mode Sérieux : mode_libre_active, mode_serieux_active, serieux_intention.
--- - Paiement 1 : accès profils/photos pendant 30 jours → profile_access.profiles_access_until.
--- - Paiement 2 : packs contacts avec quotas modifiables par l'admin (ex. 1, 3, 5, 10).
--- - Publications : admin en premier (is_pinned pour mise en avant).
--- - Campagnes publicitaires, messages de masse, paramètres admin activables/désactivables.
--- - Paiement : moteur prévu Badiboss Pay (payments.provider = 'badiboss_pay').
+-- Source de vérité pour les nouveaux environnements. Les migrations restent
+-- additives/idempotentes pour les bases existantes déjà déployées.
+--
+-- Modèle opérationnel actuel:
+-- - public.profiles.id = auth.users.id
+-- - l'app utilise username, phone, photo, gender, age, city, commune
+-- - l'administration utilise profiles.role = 'admin'
+-- - les règles sensibles doivent être portées progressivement par RPC/RLS,
+--   pas seulement par masquage côté client.
 
--- Extensions
 create extension if not exists "uuid-ossp";
 
--- RLS policies (à adapter selon vos rôles)
-alter table if exists auth.users enable row level security;
+-- ---------------------------------------------------------------------------
+-- Profils et accès
+-- ---------------------------------------------------------------------------
 
--- Profils (lié à auth.users via user_id)
--- gender 'M' = homme (accès profils conditionné par paiement), 'F' = femme (inscription libre)
 create table if not exists public.profiles (
-  id uuid primary key default uuid_generate_v4(),
-  user_id uuid references auth.users(id) on delete cascade not null unique,
-  display_name text not null,
+  id uuid primary key references auth.users(id) on delete cascade,
+  phone text,
+  photo text,
   gender text not null check (gender in ('M', 'F', 'other')),
-  birth_date date not null,
   city text not null,
-  commune text not null,
+  commune text,
   bio text,
-  avatar_url text,
-  photo_urls text[] default '{}',
-  mode_libre_active boolean default false,
-  mode_serieux_active boolean default false,
-  serieux_intention text check (serieux_intention in ('amitie', 'copinage', 'amour', 'mariage')),
-  status text default 'active' check (status in ('active', 'suspended', 'banned')),
-  is_verified boolean default false,
-  is_boosted boolean default false,
-  boosted_until timestamptz,
+  status text not null default 'active' check (status in ('active', 'suspended', 'banned')),
+  is_verified boolean not null default false,
+  username text not null,
+  age integer not null check (age >= 18),
+  mode_libre_active boolean not null default true,
+  mode_serieux_active boolean not null default false,
   boost_reason text,
-  created_at timestamptz default now(),
-  updated_at timestamptz default now()
+  boosted_until timestamptz,
+  is_boosted boolean not null default false,
+  country text default 'CD',
+  role text default 'user',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
 );
 
-create index if not exists idx_profiles_user_id on public.profiles(user_id);
 create index if not exists idx_profiles_status on public.profiles(status);
+create index if not exists idx_profiles_gender on public.profiles(gender);
 create index if not exists idx_profiles_city on public.profiles(city);
 create index if not exists idx_profiles_mode_libre on public.profiles(mode_libre_active);
 create index if not exists idx_profiles_mode_serieux on public.profiles(mode_serieux_active);
+create index if not exists idx_profiles_boosted_until on public.profiles(boosted_until);
 
--- Accès utilisateur (quotas et accès profils)
--- Pour les hommes : profiles_access_until doit être renseigné (paiement 1) pour voir photos/profils complets.
--- Pour les femmes : accès libre (inscription libre) ; profiles_access_until peut rester null ou être ignoré en logique.
--- contact_quota / contact_quota_used = paiement 2 (packs contacts, ex. 1, 3, 5, 10).
 create table if not exists public.profile_access (
-  user_id uuid references auth.users(id) on delete cascade primary key,
+  user_id uuid primary key references auth.users(id) on delete cascade,
   profiles_access_until timestamptz,
-  contact_quota int default 0,
-  contact_quota_used int default 0,
-  updated_at timestamptz default now()
+  contact_quota integer not null default 0,
+  contact_quota_used integer not null default 0,
+  photo_quota integer not null default 0,
+  photo_quota_used integer not null default 0,
+  all_profiles_access boolean not null default false,
+  updated_at timestamptz not null default now()
 );
 
--- Packs contacts (gérés par l'admin ; quotas modifiables sans déploiement, ex. 1, 3, 5, 10)
+create table if not exists public.profile_photos (
+  id uuid primary key default uuid_generate_v4(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  photo_url text not null,
+  is_primary boolean not null default false,
+  sort_order integer not null default 0,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_profile_photos_user_id on public.profile_photos(user_id);
+create index if not exists idx_profile_photos_primary
+  on public.profile_photos(user_id, is_primary desc, sort_order asc, created_at asc);
+
+-- Accès courant par profil cible. Cette table empêche de faire repayer
+-- plusieurs fois le même accès actif au même profil.
+create table if not exists public.profile_access_entitlements (
+  id uuid primary key default uuid_generate_v4(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  target_profile_id uuid not null references public.profiles(id) on delete cascade,
+  access_type text not null check (access_type in ('profile', 'photo', 'contact', 'conversation')),
+  mode text not null default 'global' check (mode in ('global', 'libre', 'serieux')),
+  source text not null default 'admin_grant'
+    check (source in ('admin_grant', 'subscription', 'credit', 'payment', 'legacy', 'webhook')),
+  payment_id text,
+  granted_by uuid references auth.users(id),
+  credits_spent integer not null default 0,
+  starts_at timestamptz not null default now(),
+  expires_at timestamptz,
+  revoked_at timestamptz,
+  reason text,
+  metadata jsonb not null default '{}',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (user_id, target_profile_id, access_type)
+);
+
+create index if not exists idx_profile_access_entitlements_user
+  on public.profile_access_entitlements(user_id, access_type, revoked_at, expires_at);
+create index if not exists idx_profile_access_entitlements_target
+  on public.profile_access_entitlements(target_profile_id);
+create unique index if not exists idx_profile_access_user_id_unique
+  on public.profile_access(user_id);
+
+create table if not exists public.profile_access_events (
+  id uuid primary key default uuid_generate_v4(),
+  entitlement_id uuid references public.profile_access_entitlements(id) on delete set null,
+  user_id uuid references auth.users(id) on delete set null,
+  target_profile_id uuid references public.profiles(id) on delete set null,
+  access_type text,
+  event_type text not null,
+  actor_id uuid references auth.users(id) on delete set null,
+  payment_id text,
+  credits_spent integer not null default 0,
+  reason text,
+  metadata jsonb not null default '{}',
+  created_at timestamptz not null default now()
+);
+
+-- ---------------------------------------------------------------------------
+-- Paiements, crédits, abonnements, boost
+-- ---------------------------------------------------------------------------
+
 create table if not exists public.contact_packs (
   id uuid primary key default uuid_generate_v4(),
   name text not null,
-  quota int not null,
-  price_cents int not null,
-  currency text default 'USD',
-  is_active boolean default true,
-  sort_order int default 0,
-  created_at timestamptz default now()
+  quota integer not null default 0,
+  contact_quota integer,
+  photo_quota integer,
+  all_profiles_access boolean not null default false,
+  price_cents integer not null default 0,
+  currency text not null default 'USD',
+  is_active boolean not null default true,
+  sort_order integer not null default 0,
+  created_at timestamptz not null default now()
 );
 
--- Paiements
--- type 'profiles_access' = paiement 1 (accès profils/photos 30 jours), 'contact_pack' = paiement 2, 'boost' = mise en avant.
--- provider = moteur de paiement (ex. 'badiboss_pay').
 create table if not exists public.payments (
   id uuid primary key default uuid_generate_v4(),
-  user_id uuid references auth.users(id) on delete cascade not null,
-  type text not null check (type in ('profiles_access', 'contact_pack', 'boost')),
+  user_id uuid references auth.users(id) on delete cascade,
+  type text,
   provider text default 'badiboss_pay',
-  amount_cents int not null,
-  currency text default 'USD',
-  status text default 'pending' check (status in ('pending', 'completed', 'failed', 'refunded')),
+  payment_provider text,
+  payment_method text,
+  transaction_ref text,
+  subscription_id text,
+  amount numeric,
+  amount_cents integer,
+  currency text not null default 'USD',
+  status text not null default 'pending' check (status in ('pending', 'completed', 'failed', 'refunded')),
   reference text,
-  metadata jsonb default '{}',
-  created_at timestamptz default now()
+  metadata jsonb not null default '{}',
+  created_at timestamptz not null default now()
 );
 
 create index if not exists idx_payments_user_id on public.payments(user_id);
+create index if not exists idx_payments_status_provider on public.payments(status, provider);
 
--- Pour base déjà créée sans la colonne provider : décommenter et exécuter une fois
--- ALTER TABLE public.payments ADD COLUMN IF NOT EXISTS provider text DEFAULT 'badiboss_pay';
+create table if not exists public.payment_events (
+  id uuid primary key default uuid_generate_v4(),
+  payment_id text,
+  provider text not null default 'badiboss_pay',
+  event_type text not null,
+  event_id text,
+  signature_valid boolean not null default false,
+  processed_at timestamptz,
+  payload jsonb not null default '{}',
+  created_at timestamptz not null default now()
+);
 
--- Conversations
+create unique index if not exists idx_payment_events_provider_event_id
+  on public.payment_events(provider, event_id)
+  where event_id is not null;
+
+create table if not exists public.user_credit_balances (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  contact_credits integer not null default 0,
+  photo_credits integer not null default 0,
+  premium_credits integer not null default 0,
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.user_subscriptions (
+  id uuid primary key default uuid_generate_v4(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  plan_key text not null,
+  status text not null default 'active' check (status in ('active', 'expired', 'cancelled', 'granted')),
+  source text not null default 'payment' check (source in ('payment', 'admin_grant', 'webhook', 'legacy')),
+  payment_id text,
+  granted_by uuid references auth.users(id) on delete set null,
+  starts_at timestamptz not null default now(),
+  ends_at timestamptz,
+  metadata jsonb not null default '{}',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_user_subscriptions_user_status
+  on public.user_subscriptions(user_id, status, ends_at);
+
+-- ---------------------------------------------------------------------------
+-- Conversations, contenus, modération
+-- ---------------------------------------------------------------------------
+
 create table if not exists public.conversations (
   id uuid primary key default uuid_generate_v4(),
   participant_ids uuid[] not null,
-  last_message_at timestamptz default now(),
-  created_at timestamptz default now()
+  last_message_at timestamptz not null default now(),
+  created_at timestamptz not null default now()
 );
 
--- Messages
 create table if not exists public.messages (
   id uuid primary key default uuid_generate_v4(),
-  conversation_id uuid references public.conversations(id) on delete cascade not null,
-  sender_id uuid references auth.users(id) on delete cascade not null,
+  conversation_id uuid not null references public.conversations(id) on delete cascade,
+  sender_id uuid not null references auth.users(id) on delete cascade,
   content text not null,
-  created_at timestamptz default now(),
+  created_at timestamptz not null default now(),
   read_at timestamptz
 );
 
 create index if not exists idx_messages_conversation on public.messages(conversation_id);
+create index if not exists idx_messages_sender on public.messages(sender_id);
 
--- Publications publiques (admin d'abord : seules les publications de l'admin sont prévues en premier ; is_pinned = en premier pour tous)
 create table if not exists public.public_publications (
   id uuid primary key default uuid_generate_v4(),
   author_id uuid references auth.users(id) on delete set null,
   title text not null,
   content text not null,
-  content_type text default 'text' check (content_type in ('text', 'image', 'video')),
+  content_type text not null default 'text' check (content_type in ('text', 'image', 'video')),
   image_url text,
   video_url text,
-  is_pinned boolean default false,
-  is_active boolean default true,
-  created_at timestamptz default now(),
-  updated_at timestamptz default now()
+  is_pinned boolean not null default false,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
 );
 
--- Campagnes publicitaires
 create table if not exists public.ad_campaigns (
   id uuid primary key default uuid_generate_v4(),
   title text not null,
@@ -136,52 +240,63 @@ create table if not exists public.ad_campaigns (
   text text not null,
   start_at timestamptz not null,
   end_at timestamptz not null,
-  audience text default 'all' check (audience in ('all', 'men', 'women', 'paying', 'non_paying')),
-  priority int default 0,
-  is_active boolean default true,
-  created_at timestamptz default now()
+  audience text not null default 'all' check (audience in ('all', 'men', 'women', 'paying', 'non_paying')),
+  priority integer not null default 0,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now()
 );
 
--- Signalements
 create table if not exists public.reports (
   id uuid primary key default uuid_generate_v4(),
-  reporter_id uuid references auth.users(id) on delete cascade not null,
-  reported_id uuid references public.profiles(id) on delete cascade not null,
+  reporter_id uuid not null references auth.users(id) on delete cascade,
+  reported_id uuid not null references public.profiles(id) on delete cascade,
   type text,
   reason text,
-  status text default 'pending' check (status in ('pending', 'reviewed', 'resolved', 'dismissed')),
-  created_at timestamptz default now(),
+  status text not null default 'pending' check (status in ('pending', 'reviewed', 'resolved', 'dismissed')),
+  created_at timestamptz not null default now(),
   resolved_at timestamptz,
   resolved_by uuid references auth.users(id)
 );
 
--- Messages de masse
 create table if not exists public.mass_messages (
   id uuid primary key default uuid_generate_v4(),
   title text not null,
   body text not null,
-  content_type text default 'text' check (content_type in ('text', 'image', 'video')),
+  content_type text not null default 'text' check (content_type in ('text', 'image', 'video')),
   image_url text,
   video_url text,
   segment text not null check (segment in ('all', 'men', 'women', 'paying', 'non_paying', 'city', 'commune', 'mode_libre', 'mode_serieux')),
   segment_value text,
   sent_at timestamptz,
   created_by uuid references auth.users(id),
-  created_at timestamptz default now()
+  created_at timestamptz not null default now()
 );
 
--- Paramètres admin (fonctionnalités activables/désactivables)
+create table if not exists public.user_announcement_read_state (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  last_read_announcements_at timestamptz not null default '1970-01-01T00:00:00Z'
+);
+
+create table if not exists public.user_publication_read_state (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  last_read_publications_at timestamptz not null default '1970-01-01T00:00:00Z'
+);
+
+-- ---------------------------------------------------------------------------
+-- Paramètres et audit
+-- ---------------------------------------------------------------------------
+
 create table if not exists public.admin_settings (
   id uuid primary key default uuid_generate_v4(),
   key text unique not null,
   value jsonb not null,
-  updated_at timestamptz default now()
+  updated_at timestamptz not null default now()
 );
 
--- Paramètres admin (fonctionnalités activables/désactivables sans toucher au code)
 insert into public.admin_settings (key, value) values
   ('mode_libre_enabled', 'true'),
   ('mode_serieux_enabled', 'true'),
+  ('reciprocal_matching_enabled', 'false'),
   ('public_publications_enabled', 'true'),
   ('ad_campaigns_enabled', 'true'),
   ('mass_messages_enabled', 'true'),
@@ -193,41 +308,101 @@ insert into public.admin_settings (key, value) values
   ('badges_enabled', 'true'),
   ('profile_verification_enabled', 'true'),
   ('contact_packs_enabled', 'true'),
-  ('promo_offers_enabled', 'true')
+  ('promo_offers_enabled', 'true'),
+  ('visibility_boost_offers', '[{"id":"boost_7","label":"7 jours","days":7,"amount":9.99,"active":true},{"id":"boost_14","label":"14 jours","days":14,"amount":17.99,"active":true},{"id":"boost_30","label":"30 jours","days":30,"amount":29.99,"active":true}]')
 on conflict (key) do nothing;
 
--- RLS (exemple : les utilisateurs voient leur propre profil)
+create table if not exists public.audit_events (
+  id uuid primary key default uuid_generate_v4(),
+  actor_id uuid references auth.users(id) on delete set null,
+  target_user_id uuid references auth.users(id) on delete set null,
+  action text not null,
+  entity_type text,
+  entity_id text,
+  reason text,
+  metadata jsonb not null default '{}',
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_audit_events_actor_created on public.audit_events(actor_id, created_at desc);
+create index if not exists idx_audit_events_target_created on public.audit_events(target_user_id, created_at desc);
+
+-- ---------------------------------------------------------------------------
+-- Fonctions utilitaires
+-- ---------------------------------------------------------------------------
+
+create or replace function public.is_profiles_admin()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.profiles pr
+    where pr.id = auth.uid()
+      and pr.role = 'admin'
+  );
+$$;
+
+create or replace function public.can_access_profile_photos(viewer_id uuid, target_user_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    viewer_id = target_user_id
+    or exists (
+      select 1 from public.profiles pr
+      where pr.id = viewer_id and pr.role = 'admin'
+    )
+    or exists (
+      select 1 from public.profile_access pa
+      where pa.user_id = viewer_id
+        and (
+          coalesce(pa.all_profiles_access, false)
+          or coalesce(pa.photo_quota, 0) > coalesce(pa.photo_quota_used, 0)
+          or (pa.profiles_access_until is not null and pa.profiles_access_until > now())
+        )
+    )
+    or exists (
+      select 1 from public.profile_access_entitlements pe
+      where pe.user_id = viewer_id
+        and pe.target_profile_id = target_user_id
+        and pe.access_type in ('profile', 'photo')
+        and pe.revoked_at is null
+        and pe.starts_at <= now()
+        and (pe.expires_at is null or pe.expires_at > now())
+    );
+$$;
+
+-- ---------------------------------------------------------------------------
+-- RLS
+-- ---------------------------------------------------------------------------
+
 alter table public.profiles enable row level security;
 alter table public.profile_access enable row level security;
-alter table public.payments enable row level security;
+alter table public.profile_photos enable row level security;
+alter table public.profile_access_entitlements enable row level security;
+alter table public.profile_access_events enable row level security;
 alter table public.contact_packs enable row level security;
+alter table public.payments enable row level security;
+alter table public.payment_events enable row level security;
+alter table public.user_credit_balances enable row level security;
+alter table public.user_subscriptions enable row level security;
 alter table public.conversations enable row level security;
 alter table public.messages enable row level security;
 alter table public.public_publications enable row level security;
 alter table public.ad_campaigns enable row level security;
 alter table public.reports enable row level security;
+alter table public.mass_messages enable row level security;
 alter table public.admin_settings enable row level security;
+alter table public.audit_events enable row level security;
+alter table public.user_announcement_read_state enable row level security;
+alter table public.user_publication_read_state enable row level security;
 
-create policy "Users can read own profile" on public.profiles for select using (auth.uid() = user_id);
-create policy "Users can update own profile" on public.profiles for update using (auth.uid() = user_id);
-create policy "Users can insert own profile" on public.profiles for insert with check (auth.uid() = user_id);
-
--- Politiques à compléter selon vos règles métier (lecture profils autres, conversations, etc.)
--- Exemple lecture profils (selon accès payant à gérer en app ou en fonction RPC)
-create policy "Profiles are readable by authenticated" on public.profiles for select using (auth.role() = 'authenticated');
-
--- Lecture app utilisateur (publications, campagnes, packs)
-create policy "Public publications readable by authenticated" on public.public_publications for select using (auth.role() = 'authenticated');
-create policy "Ad campaigns readable by authenticated" on public.ad_campaigns for select using (auth.role() = 'authenticated');
-create policy "Contact packs readable by authenticated" on public.contact_packs for select using (auth.role() = 'authenticated');
-
--- Conversations et messages : participants uniquement
-create policy "Users can read own conversations" on public.conversations for select using (auth.uid() = any(participant_ids));
-create policy "Users can insert conversations as participant" on public.conversations for insert with check (auth.uid() = any(participant_ids));
-create policy "Users can update own conversations" on public.conversations for update using (auth.uid() = any(participant_ids));
-create policy "Users can read messages in own conversations" on public.messages for select using (
-  exists (select 1 from public.conversations c where c.id = conversation_id and auth.uid() = any(c.participant_ids))
-);
-create policy "Users can send messages in own conversations" on public.messages for insert with check (
-  sender_id = auth.uid() and exists (select 1 from public.conversations c where c.id = conversation_id and auth.uid() = any(c.participant_ids))
-);
+-- Les migrations opérationnelles posent les policies idempotentes complètes.
+-- Ce fichier est une référence de bootstrap, pas un remplacement des migrations.

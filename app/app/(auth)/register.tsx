@@ -60,7 +60,10 @@ export default function RegisterScreen() {
         const code = (error as { code?: string }).code
         const status = (error as { status?: number }).status
         if (status === 429 || msg.includes('too many requests')) {
-          Alert.alert('Trop de tentatives', 'Réessayez dans quelques minutes.')
+          Alert.alert(
+            'Inscription bloquée',
+            'Supabase Auth bloque l’envoi e-mail (429 over_email_send_rate_limit). Désactivez "Confirm email" dans Auth > Providers > Email, puis réessayez.'
+          )
           return
         }
         if (code === 'user_already_exists' || msg.includes('already registered')) {

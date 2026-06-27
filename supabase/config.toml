@@ -2,3 +2,6 @@
 
 [functions.admin-set-password]
 verify_jwt = true
+
+[functions.badiboss-webhook]
+verify_jwt = false

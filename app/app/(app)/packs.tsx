@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+﻿import { useEffect, useMemo, useState } from 'react'
 import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Alert } from 'react-native'
 import { useRouter } from 'expo-router'
 import { useTheme } from '@/theme/ThemeContext'
@@ -61,29 +61,20 @@ export default function PacksScreen() {
         payment_provider: 'Badiboss Pay',
         provider: 'contact_pack',
         transaction_ref: makeTransactionRef('pack'),
-        status: 'completed',
-      })
-      if (payErr) throw new Error(payErr.message || payErr.code || 'Échec enregistrement paiement')
-
-      const currentQuota = profileAccess?.contact_quota ?? 0
-      const currentUsed = profileAccess?.contact_quota_used ?? 0
-      const newPhotoQ = (profileAccess?.photo_quota ?? 0) + (pack.photo_quota ?? 0)
-      const allAccess = !!(profileAccess?.all_profiles_access || pack.all_profiles_access)
-      const { error } = await supabase.from('profile_access').upsert(
-        {
-          user_id: user.id,
-          contact_quota: currentQuota + addContacts,
-          contact_quota_used: currentUsed,
-          photo_quota: newPhotoQ,
-          photo_quota_used: profileAccess?.photo_quota_used ?? 0,
-          all_profiles_access: allAccess,
-          updated_at: new Date().toISOString(),
+        status: 'pending',
+        metadata: {
+          pack_id: pack.id,
+          pack_name: pack.name,
+          quota: pack.quota,
+          contact_quota: addContacts,
+          photo_quota: pack.photo_quota ?? 0,
+          all_profiles_access: !!pack.all_profiles_access,
         },
-        { onConflict: 'user_id' }
-      )
-      if (error) throw new Error(error.message || error.code || 'Échec mise à jour quotas')
+      })
+      if (payErr) throw new Error(payErr.message || payErr.code || 'Ã‰chec enregistrement paiement')
+
       await refreshProfile()
-      Alert.alert('Pack activé', `+${addContacts} contact(s) ajouté(s).`)
+      Alert.alert('Commande crÃ©Ã©e', `AprÃ¨s confirmation Badiboss Pay, +${addContacts} contact(s) seront ajoutÃ©s par le serveur.`)
     } catch (e: any) {
       Alert.alert('Paiement', e?.message ?? 'Impossible de finaliser le paiement.')
     } finally {
@@ -98,7 +89,7 @@ export default function PacksScreen() {
           <Text style={{ color: colors.primary, fontWeight: '600' }}>Retour</Text>
         </Pressable>
         <Text style={[styles.title, { color: colors.text }]}>Packs contacts</Text>
-        <Text style={[styles.subtitle, { color: colors.textMuted }]}>Module désactivé dans l’administration.</Text>
+        <Text style={[styles.subtitle, { color: colors.textMuted }]}>Module dÃ©sactivÃ© dans lâ€™administration.</Text>
       </ScrollView>
     )
   }
@@ -111,11 +102,11 @@ export default function PacksScreen() {
         </Pressable>
         <Text style={[styles.title, { color: colors.text }]}>Packs contacts</Text>
         <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-          Les packs contacts sont prévus pour le parcours standard homme (débloquer des prises de contact). Sans réciprocité
-          activée par l’admin, ce n’est pas l’offre principale côté femme.
+          Les packs contacts sont prÃ©vus pour le parcours standard homme (dÃ©bloquer des prises de contact). Sans rÃ©ciprocitÃ©
+          activÃ©e par lâ€™admin, ce nâ€™est pas lâ€™offre principale cÃ´tÃ© femme.
         </Text>
         <Pressable onPress={() => router.replace('/(app)/payments')} style={[styles.buyBtn, { backgroundColor: colors.primary, marginTop: 20, alignSelf: 'flex-start' }]}>
-          <Text style={styles.buyBtnText}>Aller à la mise en avant</Text>
+          <Text style={styles.buyBtnText}>Aller Ã  la mise en avant</Text>
         </Pressable>
       </ScrollView>
     )
@@ -143,7 +134,7 @@ export default function PacksScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={[styles.cardTitle, { color: colors.text }]}>{p.name}</Text>
                 <Text style={[styles.cardDesc, { color: colors.textSecondary }]}>
-                  {p.contact_quota ?? p.quota} contact(s) • {formatPriceUsd(p.price_cents, p.currency)}
+                  {p.contact_quota ?? p.quota} contact(s) â€¢ {formatPriceUsd(p.price_cents, p.currency)}
                 </Text>
               </View>
               <Pressable
@@ -160,7 +151,7 @@ export default function PacksScreen() {
           ))}
           {packs.length === 0 && (
             <Text style={[styles.empty, { color: colors.textMuted }]}>
-              Aucun pack actif pour le moment (à configurer côté admin).
+              Aucun pack actif pour le moment (Ã  configurer cÃ´tÃ© admin).
             </Text>
           )}
         </View>
@@ -195,4 +186,3 @@ const styles = StyleSheet.create({
   buyBtnText: { color: '#FFF', fontSize: 14, fontWeight: '700' },
   empty: { textAlign: 'center', marginTop: 32 },
 })
-
