@@ -1,19 +1,25 @@
 ﻿import { useEffect, useMemo, useState } from 'react'
-import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Alert } from 'react-native'
+import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Alert, TextInput } from 'react-native'
 import { useRouter } from 'expo-router'
 import { useTheme } from '@/theme/ThemeContext'
 import { useAuth } from '@/contexts/AuthContext'
 import { useAppFeatureFlags } from '@/lib/useAppFeatureFlags'
-import { supabase } from '@/lib/supabase'
 import type { ContactPack } from '../../../lib/types'
 import { remainingContacts } from '../../../lib/access'
+import {
+  PAYMENT_CURRENCIES,
+  PAYMENT_NETWORKS,
+  checkServerPayment,
+  createServerPayment,
+  paymentStatusLabel,
+  type PaymentCurrency,
+  type PaymentNetwork,
+  type PaymentStatus,
+} from '@/lib/paymentGateway'
+import { supabase } from '@/lib/supabase'
 
 function formatPriceUsd(priceCents: number, currency?: string) {
   return `${(priceCents / 100).toFixed(2)} ${currency || 'USD'}`
-}
-
-function makeTransactionRef(prefix: string) {
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
 export default function PacksScreen() {
@@ -27,6 +33,10 @@ export default function PacksScreen() {
   const [packs, setPacks] = useState<ContactPack[]>([])
   const [loading, setLoading] = useState(true)
   const [buyingId, setBuyingId] = useState<string | null>(null)
+  const [network, setNetwork] = useState<PaymentNetwork>('OM')
+  const [currency, setCurrency] = useState<PaymentCurrency>('USD')
+  const [customerPhone, setCustomerPhone] = useState(profile?.phone ?? '+243')
+  const [pending, setPending] = useState<{ packId: string; transactionId: string; status: PaymentStatus } | null>(null)
 
   const contactsLeft = useMemo(() => remainingContacts(profileAccess), [profileAccess])
 
@@ -53,15 +63,12 @@ export default function PacksScreen() {
     const addContacts = pack.contact_quota ?? pack.quota
     try {
       setBuyingId(pack.id)
-      const { error: payErr } = await supabase.from('payments').insert({
-        user_id: user.id,
+      const result = await createServerPayment({
+        payment_type: 'contact_pack',
         amount: Number((pack.price_cents / 100).toFixed(2)),
-        currency: pack.currency,
-        payment_method: 'secure_checkout',
-        payment_provider: 'secure_checkout',
-        provider: 'contact_pack',
-        transaction_ref: makeTransactionRef('pack'),
-        status: 'pending',
+        currency,
+        customer_phone: customerPhone,
+        network,
         metadata: {
           pack_id: pack.id,
           pack_name: pack.name,
@@ -71,12 +78,30 @@ export default function PacksScreen() {
           all_profiles_access: !!pack.all_profiles_access,
         },
       })
-      if (payErr) throw new Error(payErr.message || payErr.code || 'Echec enregistrement paiement')
-
-      await refreshProfile()
-      Alert.alert('Commande creee', `Apres confirmation du paiement, +${addContacts} contact(s) seront ajoutes par le serveur.`)
+      setPending({ packId: pack.id, transactionId: result.transaction_id, status: result.status })
+      Alert.alert('Paiement Mobile Money', result.message || `Paiement en attente. +${addContacts} contact(s) apres confirmation serveur.`)
     } catch (e: any) {
       Alert.alert('Paiement', e?.message ?? 'Impossible de finaliser le paiement.')
+    } finally {
+      setBuyingId(null)
+    }
+  }
+
+  const verifyPayment = async () => {
+    if (!pending) return
+    try {
+      setBuyingId(pending.packId)
+      const result = await checkServerPayment(pending.transactionId)
+      setPending({ ...pending, status: result.status })
+      if (result.status === 'completed') {
+        await refreshProfile()
+        Alert.alert('Paiement reussi', 'Vos droits seront disponibles automatiquement.')
+        setPending(null)
+      } else {
+        Alert.alert(paymentStatusLabel(result.status), result.message)
+      }
+    } catch (e: any) {
+      Alert.alert('Paiement', e?.message ?? 'Verification du paiement impossible.')
     } finally {
       setBuyingId(null)
     }
@@ -122,6 +147,47 @@ export default function PacksScreen() {
       <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
         Contacts restants : {contactsLeft}
       </Text>
+      <View style={[styles.paymentBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>Paiement Mobile Money</Text>
+        <TextInput
+          value={customerPhone}
+          onChangeText={setCustomerPhone}
+          keyboardType="phone-pad"
+          placeholder="+243 8XX XXX XXX"
+          placeholderTextColor={colors.textMuted}
+          style={[styles.input, { color: colors.text, borderColor: colors.border }]}
+        />
+        <View style={styles.choiceRow}>
+          {PAYMENT_NETWORKS.map((item) => (
+            <Pressable
+              key={item.value}
+              onPress={() => setNetwork(item.value)}
+              style={[styles.choice, { borderColor: network === item.value ? colors.primary : colors.border }]}
+            >
+              <Text style={[styles.choiceText, { color: colors.text }]}>{item.label}</Text>
+            </Pressable>
+          ))}
+        </View>
+        <View style={styles.choiceRow}>
+          {PAYMENT_CURRENCIES.map((item) => (
+            <Pressable
+              key={item}
+              onPress={() => setCurrency(item)}
+              style={[styles.choice, { borderColor: currency === item ? colors.primary : colors.border }]}
+            >
+              <Text style={[styles.choiceText, { color: colors.text }]}>{item}</Text>
+            </Pressable>
+          ))}
+        </View>
+        {pending ? (
+          <View style={{ gap: 8 }}>
+            <Text style={[styles.pending, { color: colors.warning }]}>{paymentStatusLabel(pending.status)}</Text>
+            <Pressable onPress={verifyPayment} disabled={!!buyingId} style={[styles.buyBtn, { backgroundColor: colors.primary, alignSelf: 'flex-start' }]}>
+              <Text style={styles.buyBtnText}>Verifier le paiement</Text>
+            </Pressable>
+          </View>
+        ) : null}
+      </View>
 
       {loading ? (
         <View style={styles.centered}>
@@ -134,7 +200,7 @@ export default function PacksScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={[styles.cardTitle, { color: colors.text }]}>{p.name}</Text>
                 <Text style={[styles.cardDesc, { color: colors.textSecondary }]}>
-                  {p.contact_quota ?? p.quota} contact(s) - {formatPriceUsd(p.price_cents, p.currency)}
+                  {p.contact_quota ?? p.quota} contact(s) - {formatPriceUsd(p.price_cents, currency)}
                 </Text>
               </View>
               <Pressable
@@ -145,7 +211,7 @@ export default function PacksScreen() {
                   { backgroundColor: colors.accent, opacity: pressed ? 0.92 : 1 },
                 ]}
               >
-                <Text style={styles.buyBtnText}>{buyingId === p.id ? 'Achat...' : 'Acheter'}</Text>
+                <Text style={styles.buyBtnText}>{buyingId === p.id ? 'Paiement...' : 'Payer'}</Text>
               </Pressable>
             </View>
           ))}
@@ -176,6 +242,13 @@ const styles = StyleSheet.create({
   },
   cardTitle: { fontSize: 16, fontWeight: '700' },
   cardDesc: { fontSize: 14, marginTop: 4 },
+  paymentBox: { borderWidth: 1, borderRadius: 14, padding: 14, marginTop: 16, gap: 12 },
+  sectionTitle: { fontSize: 15, fontWeight: '700' },
+  input: { height: 46, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, fontSize: 15 },
+  choiceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  choice: { borderWidth: 1, borderRadius: 10, paddingVertical: 8, paddingHorizontal: 10 },
+  choiceText: { fontSize: 13, fontWeight: '600' },
+  pending: { fontSize: 14, fontWeight: '700' },
   buyBtn: {
     height: 42,
     paddingHorizontal: 14,

@@ -1,5 +1,5 @@
 ﻿import { useEffect, useState } from 'react'
-import { View, Text, StyleSheet, ScrollView, Pressable, Alert, ActivityIndicator } from 'react-native'
+import { View, Text, StyleSheet, ScrollView, Pressable, Alert, ActivityIndicator, TextInput } from 'react-native'
 import { useRouter } from 'expo-router'
 import { useTheme } from '@/theme/ThemeContext'
 import { useAuth } from '@/contexts/AuthContext'
@@ -12,6 +12,16 @@ import {
   VISIBILITY_BOOST_TIERS,
 } from '../../../lib/constants'
 import { formatBoostStatusLabel } from '../../../lib/boostVisibility'
+import {
+  PAYMENT_CURRENCIES,
+  PAYMENT_NETWORKS,
+  checkServerPayment,
+  createServerPayment,
+  paymentStatusLabel,
+  type PaymentCurrency,
+  type PaymentNetwork,
+  type PaymentStatus,
+} from '@/lib/paymentGateway'
 
 type BoostTier = { days: number; label: string; amount: number }
 const PAYMENT_CHANNEL_LABEL = 'Paiement securise'
@@ -23,12 +33,8 @@ function normalizeGender(gender?: string | null) {
   return gender ?? 'other'
 }
 
-function formatUsd(amount: number) {
-  return `${amount.toFixed(2)} USD`
-}
-
-function makeTransactionRef(prefix: string) {
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+function formatAmount(amount: number, currency: string) {
+  return `${amount.toFixed(2)} ${currency}`
 }
 
 export default function PaymentsScreen() {
@@ -57,8 +63,12 @@ export default function PaymentsScreen() {
 
   const [boostTierIdx, setBoostTierIdx] = useState(0)
   const [boostPendingId, setBoostPendingId] = useState<string | null>(null)
+  const [boostPendingStatus, setBoostPendingStatus] = useState<PaymentStatus>('pending')
   const [boostBusy, setBoostBusy] = useState(false)
   const [boostTiers, setBoostTiers] = useState<BoostTier[]>([...VISIBILITY_BOOST_TIERS])
+  const [network, setNetwork] = useState<PaymentNetwork>('OM')
+  const [currency, setCurrency] = useState<PaymentCurrency>('USD')
+  const [customerPhone, setCustomerPhone] = useState(profile?.phone ?? '+243')
 
   useEffect(() => {
     let cancelled = false
@@ -102,14 +112,18 @@ export default function PaymentsScreen() {
     void (async () => {
       const { data } = await supabase
         .from('payments')
-        .select('id')
+        .select('id,status,transaction_ref,metadata')
         .eq('user_id', user.id)
         .eq('provider', PAYMENT_PROVIDER_VISIBILITY_BOOST)
         .eq('status', 'pending')
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle()
-      if (!cancelled) setBoostPendingId((data as { id?: string } | null)?.id ?? null)
+      if (!cancelled) {
+        const row = data as { id?: string; status?: PaymentStatus; transaction_ref?: string | null; metadata?: Record<string, unknown> | null } | null
+        setBoostPendingId(String(row?.metadata?.gateway_transaction_id ?? row?.transaction_ref ?? row?.id ?? '') || null)
+        setBoostPendingStatus(row?.status ?? 'pending')
+      }
     })()
     return () => {
       cancelled = true
@@ -117,29 +131,7 @@ export default function PaymentsScreen() {
   }, [user?.id, canBuyBoost, profile?.id, profile?.boosted_until, profile?.boost_reason])
 
   const buyProfilesAccess = async () => {
-    if (!user?.id || !profile) return
-    try {
-      const { error: payErr } = await supabase.from('payments').insert({
-        user_id: user.id,
-        amount: 0,
-        currency: 'USD',
-        payment_method: 'secure_checkout',
-        payment_provider: 'secure_checkout',
-        provider: 'profiles_access',
-        transaction_ref: makeTransactionRef('profiles'),
-        status: 'pending',
-        metadata: {
-          photo_quota: 100,
-          all_profiles_access: true,
-        },
-      })
-      if (payErr) throw new Error(payErr.message || payErr.code || 'Echec enregistrement paiement')
-
-      await refreshProfile()
-      Alert.alert('Commande creee', "Apres confirmation du paiement, l'acces sera active automatiquement par le serveur.")
-    } catch (e: unknown) {
-      Alert.alert('Paiement', e instanceof Error ? e.message : "Impossible d'activer l'acces.")
-    }
+    router.push('/(app)/packs')
   }
 
   const createBoostOrder = async () => {
@@ -148,31 +140,23 @@ export default function PaymentsScreen() {
     if (!tier) return
     setBoostBusy(true)
     try {
-      const { data, error } = await supabase
-        .from('payments')
-        .insert({
-          user_id: user.id,
+      const result = await createServerPayment({
+        payment_type: 'visibility_boost',
+        amount: tier.amount,
+        currency,
+        customer_phone: customerPhone,
+        network,
+        metadata: {
+          days: tier.days,
+          label: tier.label,
           amount: tier.amount,
-          currency: 'USD',
-          payment_method: 'secure_checkout',
-          payment_provider: 'secure_checkout',
-          provider: PAYMENT_PROVIDER_VISIBILITY_BOOST,
-          transaction_ref: makeTransactionRef('boost'),
-          status: 'pending',
-          metadata: {
-            days: tier.days,
-            label: tier.label,
-            amount: tier.amount,
-          },
-        })
-        .select('id')
-        .single()
-      if (error) throw new Error(error.message || error.code || 'Echec creation commande boost')
-      const id = (data as { id: string }).id
-      setBoostPendingId(id)
+        },
+      })
+      setBoostPendingId(result.transaction_id)
+      setBoostPendingStatus(result.status)
       Alert.alert(
-        'Commande creee',
-        `Montant : ${formatUsd(tier.amount)}. Apres paiement, appuyez sur Confirmer le paiement.`
+        'Paiement Mobile Money',
+        result.message || `Montant : ${formatAmount(tier.amount, currency)}. Verifiez le paiement apres validation.`
       )
     } catch (e: unknown) {
       Alert.alert('Boost', e instanceof Error ? e.message : 'Impossible de creer la commande.')
@@ -185,30 +169,14 @@ export default function PaymentsScreen() {
     if (!user?.id || !profile || !boostPendingId || boostBusy) return
     setBoostBusy(true)
     try {
-      const { data: pay, error: selErr } = await supabase
-        .from('payments')
-        .select('id,status,provider,payment_provider')
-        .eq('id', boostPendingId)
-        .eq('user_id', user.id)
-        .maybeSingle()
-      if (selErr) throw new Error(selErr.message || 'Lecture paiement impossible')
-      const row = pay as {
-        status?: string
-        provider?: string | null
-        payment_provider?: string | null
-      } | null
-      if (!row || (row.status !== 'pending' && row.status !== 'completed')) {
-        throw new Error('Aucune commande boost en attente pour ce compte.')
-      }
-      if (row.provider !== PAYMENT_PROVIDER_VISIBILITY_BOOST) {
-        throw new Error("Cette commande n'est pas une mise en avant valide.")
-      }
-      await refreshProfile()
-      if (row.status === 'completed') {
+      const result = await checkServerPayment(boostPendingId)
+      setBoostPendingStatus(result.status)
+      if (result.status === 'completed') {
+        await refreshProfile()
         setBoostPendingId(null)
-        Alert.alert('Boost active', 'Le paiement a ete confirme par le serveur.')
+        Alert.alert('Paiement reussi', 'Votre mise en avant est activee automatiquement.')
       } else {
-        Alert.alert('Paiement en attente', "La confirmation n'est pas encore recue par le serveur.")
+        Alert.alert(paymentStatusLabel(result.status), result.message)
       }
     } catch (e: unknown) {
       Alert.alert('Boost', e instanceof Error ? e.message : 'Confirmation impossible.')
@@ -252,18 +220,19 @@ export default function PaymentsScreen() {
               ]}
             >
               <Text style={{ color: c.text, fontWeight: '600', fontSize: 13 }}>{t.label}</Text>
-              <Text style={{ color: c.textSecondary, fontSize: 12 }}>{formatUsd(t.amount)}</Text>
+              <Text style={{ color: c.textSecondary, fontSize: 12 }}>{formatAmount(t.amount, currency)}</Text>
             </Pressable>
           ))}
         </View>
         <Text style={[styles.priceLine, { color: c.text }]}>
-          Total a payer : {formatUsd(tier.amount)} - {tier.label}
+          Total a payer : {formatAmount(tier.amount, currency)} - {tier.label}
         </Text>
+        {renderPaymentControls()}
 
         {boostPendingId ? (
           <View style={{ gap: 10 }}>
             <Text style={[styles.cardDesc, { color: c.warning }]}>
-              Commande en attente de paiement. Confirmez apres paiement pour activer le boost.
+              {paymentStatusLabel(boostPendingStatus)}. Verifiez apres validation sur votre telephone.
             </Text>
             <Pressable
               onPress={confirmBoostPayment}
@@ -273,7 +242,7 @@ export default function PaymentsScreen() {
               {boostBusy ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <Text style={styles.btnText}>Confirmer le paiement</Text>
+                <Text style={styles.btnText}>Verifier le paiement</Text>
               )}
             </Pressable>
           </View>
@@ -286,13 +255,49 @@ export default function PaymentsScreen() {
             {boostBusy ? (
               <ActivityIndicator color="#fff" />
             ) : (
-              <Text style={styles.btnText}>Creer la commande</Text>
+              <Text style={styles.btnText}>Payer</Text>
             )}
           </Pressable>
         )}
       </View>
     )
   }
+
+  const renderPaymentControls = () => (
+    <View style={[styles.paymentBox, { borderColor: c.border }]}>
+      <Text style={[styles.paymentTitle, { color: c.text }]}>Paiement Mobile Money</Text>
+      <TextInput
+        value={customerPhone}
+        onChangeText={setCustomerPhone}
+        keyboardType="phone-pad"
+        placeholder="+243 8XX XXX XXX"
+        placeholderTextColor={c.textMuted}
+        style={[styles.input, { borderColor: c.border, color: c.text }]}
+      />
+      <View style={styles.choiceRow}>
+        {PAYMENT_NETWORKS.map((item) => (
+          <Pressable
+            key={item.value}
+            onPress={() => setNetwork(item.value)}
+            style={[styles.choice, { borderColor: network === item.value ? c.primary : c.border }]}
+          >
+            <Text style={[styles.choiceText, { color: c.text }]}>{item.label}</Text>
+          </Pressable>
+        ))}
+      </View>
+      <View style={styles.choiceRow}>
+        {PAYMENT_CURRENCIES.map((item) => (
+          <Pressable
+            key={item}
+            onPress={() => setCurrency(item)}
+            style={[styles.choice, { borderColor: currency === item ? c.primary : c.border }]}
+          >
+            <Text style={[styles.choiceText, { color: c.text }]}>{item}</Text>
+          </Pressable>
+        ))}
+      </View>
+    </View>
+  )
 
   return (
     <ScrollView style={[styles.container, { backgroundColor: c.background }]} contentContainerStyle={styles.content}>
@@ -322,7 +327,7 @@ export default function PaymentsScreen() {
             </Text>
           ) : null}
           <Pressable onPress={buyProfilesAccess} style={[styles.btn, { backgroundColor: c.primary }]}>
-            <Text style={styles.btnText}>Creer la commande</Text>
+            <Text style={styles.btnText}>Voir les packs</Text>
           </Pressable>
         </View>
       ) : normalizeGender(profile?.gender) === 'F' ? (
@@ -378,6 +383,12 @@ const styles = StyleSheet.create({
     minWidth: '30%',
   },
   priceLine: { fontSize: 15, fontWeight: '600', marginBottom: 14 },
+  paymentBox: { borderWidth: 1, borderRadius: 12, padding: 12, marginBottom: 14, gap: 10 },
+  paymentTitle: { fontSize: 14, fontWeight: '700' },
+  input: { height: 44, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, fontSize: 15 },
+  choiceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  choice: { borderWidth: 1, borderRadius: 10, paddingVertical: 8, paddingHorizontal: 10 },
+  choiceText: { fontSize: 13, fontWeight: '600' },
   btn: {
     height: 48,
     borderRadius: 12,

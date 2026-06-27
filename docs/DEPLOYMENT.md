@@ -12,7 +12,8 @@
 
 - `EXPO_PUBLIC_SUPABASE_URL` — URL du projet Supabase
 - `EXPO_PUBLIC_SUPABASE_ANON_KEY` — Clé anon Supabase
-- `EXPO_PUBLIC_PAYMENT_API_BASE` — (optionnel) URL API paiement
+
+Ne pas exposer de variable paiement dans Expo. Les paiements passent par les Edge Functions Supabase.
 
 ### Admin (Vite)
 
@@ -73,7 +74,19 @@ Pour les stores : configurer EAS Build (expo build) et soumettre les binaires.
 
 ## Paiement réel
 
-La simulation est en place (packs.tsx, payments.tsx). Pour passer en production :
+Les paiements passent par les Edge Functions Supabase :
 
-1. Configurer l’API paiement et le webhook.
-2. Remplacer les inserts directs dans `payments` et `profile_access` par des appels à l’API puis mise à jour après callback webhook.
+1. `payment-create` crée une transaction pending et appelle la passerelle côté serveur.
+2. `payment-status` vérifie le statut côté serveur.
+3. Le webhook Supabase de paiement reste le point de callback sécurisé et active les droits.
+
+Variables serveur à configurer dans Supabase uniquement :
+
+- `PAYMENT_API_KEY`
+- `PAYMENT_API_SECRET`
+- `PAYMENT_WEBHOOK_SECRET`
+- `PAYMENT_BASE_URL`
+- `PAYMENT_APP_SLUG`
+- `PAYMENT_APP_ID`
+
+Ne jamais mettre ces valeurs dans `EXPO_PUBLIC_*`, `VITE_*` ou dans le bundle frontend.

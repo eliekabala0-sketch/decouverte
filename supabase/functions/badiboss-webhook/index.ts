@@ -2,7 +2,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.1'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-badiboss-signature',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-badiboss-signature, x-badiboss-timestamp',
 }
 
 function json(body: unknown, status = 200) {
@@ -41,6 +41,14 @@ function safeEquals(a: string, b: string): boolean {
   return out === 0
 }
 
+function timestampFresh(value: string): boolean {
+  if (!value) return true
+  const raw = Number(value)
+  const millis = raw > 10_000_000_000 ? raw : raw * 1000
+  if (!Number.isFinite(millis)) return false
+  return Math.abs(Date.now() - millis) <= 24 * 60 * 60 * 1000
+}
+
 function extendUntil(current: string | null | undefined, days: number): string {
   const now = Date.now()
   const cur = current ? new Date(current).getTime() : 0
@@ -54,15 +62,22 @@ Deno.serve(async (req) => {
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-  const webhookSecret = Deno.env.get('BADIBOSS_WEBHOOK_SECRET') ?? ''
+  const webhookSecret = Deno.env.get('PAYMENT_WEBHOOK_SECRET') ?? Deno.env.get('BADIBOSS_WEBHOOK_SECRET') ?? ''
   if (!supabaseUrl || !serviceKey || !webhookSecret) {
     return json({ error: 'Webhook not configured' }, 500)
   }
 
   const bodyText = await req.text()
   const providedSig = req.headers.get('x-badiboss-signature') ?? ''
-  const expectedSig = await hmacSha256Hex(webhookSecret, bodyText)
-  const signatureValid = safeEquals(providedSig, expectedSig)
+  const providedTimestamp = req.headers.get('x-badiboss-timestamp') ?? ''
+  const expectedBodySig = await hmacSha256Hex(webhookSecret, bodyText)
+  const expectedTimestampSig = providedTimestamp
+    ? await hmacSha256Hex(webhookSecret, `${providedTimestamp}.${bodyText}`)
+    : expectedBodySig
+  const timestampValid = timestampFresh(providedTimestamp)
+  const signatureValid =
+    timestampValid &&
+    (safeEquals(providedSig, expectedBodySig) || safeEquals(providedSig, expectedTimestampSig))
 
   let payload: Record<string, unknown>
   try {
@@ -119,6 +134,7 @@ Deno.serve(async (req) => {
   const userId = String(paymentRow.user_id ?? '')
   const provider = String(paymentRow.provider ?? paymentRow.type ?? '')
   const metadata = (paymentRow.metadata && typeof paymentRow.metadata === 'object' ? paymentRow.metadata : {}) as Record<string, unknown>
+  const alreadyActivated = Boolean(metadata.activation_processed_at)
 
   const nextStatus = completed ? 'completed' : failed ? 'failed' : 'pending'
   const { error: payUpdateErr } = await supabase
@@ -127,7 +143,7 @@ Deno.serve(async (req) => {
     .eq('id', paymentRow.id)
   if (payUpdateErr) return json({ error: payUpdateErr.message }, 400)
 
-  if (completed && userId) {
+  if (completed && userId && !alreadyActivated) {
     if (provider === 'profiles_access') {
       const photoQuota = Number(metadata.photo_quota ?? 100)
       const { error: accessErr } = await supabase.from('profile_access').upsert(
@@ -199,6 +215,20 @@ Deno.serve(async (req) => {
       })
       if (eventErr) return json({ error: eventErr.message }, 400)
     }
+  }
+
+  if (completed && !alreadyActivated) {
+    const { error: metaErr } = await supabase
+      .from('payments')
+      .update({
+        metadata: {
+          ...metadata,
+          activation_processed_at: new Date().toISOString(),
+          activation_source: 'webhook',
+        },
+      })
+      .eq('id', paymentRow.id)
+    if (metaErr) return json({ error: metaErr.message }, 400)
   }
 
   if (eventRow?.id) {
