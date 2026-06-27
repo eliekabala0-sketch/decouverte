@@ -3,7 +3,7 @@ import { supabase } from '@lib/supabase'
 import { PageHeader } from '../components/PageHeader'
 import './DashboardPage.css'
 
-type Setting = { id: string; key: string; value: boolean | number | string }
+type Setting = { id: string; key: string; value: unknown }
 
 /** Clés réellement lues par l’app mobile (ou admin FeatureGate). */
 const WIRED_KEYS = new Set([
@@ -16,6 +16,10 @@ const WIRED_KEYS = new Set([
   'boost_enabled',
   'reporting_enabled',
   'contact_packs_enabled',
+  'female_non_reciprocal_feed_limit',
+  'feed_default_page_size',
+  'feed_max_page_size',
+  'male_boost_requires_reciprocity',
 ])
 
 const LABELS: Record<string, string> = {
@@ -33,6 +37,10 @@ const LABELS: Record<string, string> = {
   badges_enabled: 'Badges',
   profile_verification_enabled: 'Vérification profil',
   contact_packs_enabled: 'Packs contacts',
+  female_non_reciprocal_feed_limit: 'Limite feed femme sans reciprocite',
+  feed_default_page_size: 'Taille page feed par defaut',
+  feed_max_page_size: 'Taille page feed maximum',
+  male_boost_requires_reciprocity: 'Boost homme soumis a reciprocite',
   promo_offers_enabled: 'Offres promotionnelles',
 }
 
@@ -47,6 +55,12 @@ const HELP: Record<string, string> = {
   boost_enabled: 'Contrôle l’affichage des actions de boost / mise en avant dans Paiements (app).',
   reporting_enabled: 'Bouton signaler sur la fiche profil (app).',
   contact_packs_enabled: 'Packs contacts app + module admin.',
+  female_non_reciprocal_feed_limit:
+    'Nombre maximum de profils visibles en apercu pour une femme lorsque la recherche reciproque est desactivee.',
+  feed_default_page_size: 'Taille de page demandee par defaut par le RPC get_profile_feed.',
+  feed_max_page_size: 'Plafond serveur applique a toute pagination feed.',
+  male_boost_requires_reciprocity:
+    'Si actif, un homme ne peut acheter ou recevoir un boost visible que lorsque la recherche reciproque est activee.',
   display_photos_enabled: 'Non branché dans l’app actuelle (réservé).',
   direct_contact_access_enabled: 'Non branché dans l’app actuelle (réservé).',
   match_required_enabled: 'Non branché dans l’app actuelle (réservé).',
@@ -108,6 +122,18 @@ export function SettingsPage() {
     setSettings((prev) => prev.map((s) => (s.key === key ? { ...s, value } : s)))
   }
 
+  const updateSettingValue = async (key: string, value: string | number) => {
+    const { error } = await supabase
+      .from('admin_settings')
+      .update({ value, updated_at: new Date().toISOString() })
+      .eq('key', key)
+    if (error) {
+      alert(`Erreur enregistrement ${key}: ${error.message}`)
+      return
+    }
+    setSettings((prev) => prev.map((s) => (s.key === key ? { ...s, value } : s)))
+  }
+
   const saveBoostOffers = async () => {
     const normalized = boostOffers
       .map((r) => ({
@@ -142,6 +168,7 @@ export function SettingsPage() {
 
   const renderRow = (s: Setting) => {
     const isBool = typeof s.value === 'boolean'
+    const isNumber = typeof s.value === 'number'
     const wired = WIRED_KEYS.has(s.key)
     return (
       <li key={s.id} className="toggle-item">
@@ -159,6 +186,23 @@ export function SettingsPage() {
         </div>
         {isBool ? (
           <input type="checkbox" checked={s.value as boolean} onChange={(e) => toggle(s.key, e.target.checked)} />
+        ) : isNumber ? (
+          <input
+            type="number"
+            min={0}
+            defaultValue={String(s.value)}
+            onBlur={(e) => {
+              const next = Number(e.target.value)
+              if (Number.isFinite(next)) void updateSettingValue(s.key, next)
+            }}
+            style={{ maxWidth: 110 }}
+          />
+        ) : typeof s.value === 'string' ? (
+          <input
+            defaultValue={s.value}
+            onBlur={(e) => void updateSettingValue(s.key, e.target.value)}
+            style={{ maxWidth: 180 }}
+          />
         ) : (
           <span>{String(s.value)}</span>
         )}

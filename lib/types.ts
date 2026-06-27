@@ -22,7 +22,7 @@ export interface User {
 export interface Profile {
   id: string
   created_at: string
-  phone: string
+  phone?: string
   photo: string | null
   gender: Gender
   city: string
@@ -42,6 +42,10 @@ export interface Profile {
   is_boosted?: boolean | null
   country: string | null
   role: string | null
+  can_view_full?: boolean
+  is_limited_teaser?: boolean
+  active_boost?: boolean
+  total_count?: number
 }
 
 export interface ProfileAccess {

@@ -17,8 +17,16 @@ import { GENDER_LABELS } from '../../../../lib/constants'
 import { canViewFullProfiles, remainingContacts } from '../../../../lib/access'
 import { supabase } from '@/lib/supabase'
 import type { Profile } from '../../../../lib/types'
+import { getProfilePrivateDetails } from '../../../lib/profilePrivateDetailsRpc'
 import { listProfilePhotos, type ProfilePhotoRow } from '../../../lib/profilePhotos'
 import { unlockProfileContact, unlockProfilePhoto } from '../../../lib/profileAccessRpc'
+
+function normalizeGender(gender?: string | null) {
+  const value = String(gender ?? '').trim().toLowerCase()
+  if (['m', 'male', 'man', 'homme', 'h'].includes(value)) return 'M'
+  if (['f', 'female', 'woman', 'femme'].includes(value)) return 'F'
+  return gender ?? 'other'
+}
 
 export default function ProfileDetailScreen() {
   const router = useRouter()
@@ -49,7 +57,7 @@ export default function ProfileDetailScreen() {
         .maybeSingle()
       setReciprocalEnabled(Boolean((setting as { value?: boolean } | null)?.value))
       const core =
-        'id,created_at,phone,photo,gender,city,commune,bio,status,is_verified,username,age,boost_reason,country,role'
+        'id,created_at,gender,city,commune,status,is_verified,username,age,boost_reason,country,role'
       const { data: coreRow, error: coreErr } = await supabase.from('profiles').select(core).eq('id', params.id).single()
       if (coreErr) {
         setProfile(null)
@@ -66,19 +74,41 @@ export default function ProfileDetailScreen() {
           merged = { ...merged, ...(extra.data as Pick<Profile, 'boosted_until' | 'is_boosted'>) }
         }
       }
-      setProfile(merged)
-      if (params.id) {
-        try {
-          const rows = await listProfilePhotos(params.id)
-          setPhotos(rows)
-        } catch {
-          setPhotos([])
-        }
-      }
+      setProfile(merged ? { ...merged, photo: null, bio: null } : null)
+      setPhotos([])
       setLoading(false)
     }
     load()
   }, [params.id])
+
+  useEffect(() => {
+    if (!profile?.id || !photoAccessReady) {
+      setPhotos([])
+      return
+    }
+    let cancelled = false
+    void (async () => {
+      try {
+        const sensitive = await getProfilePrivateDetails(profile.id)
+        if (!cancelled && sensitive) {
+          setProfile((prev) => (prev ? { ...prev, photo: sensitive.photo, bio: sensitive.bio } : prev))
+        }
+      } catch {
+        if (!cancelled) {
+          setProfile((prev) => (prev ? { ...prev, photo: null, bio: null } : prev))
+        }
+      }
+      try {
+        const rows = await listProfilePhotos(profile.id)
+        if (!cancelled) setPhotos(rows)
+      } catch {
+        if (!cancelled) setPhotos([])
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [profile?.id, photoAccessReady])
 
   useEffect(() => {
     if (!user?.id || !profile?.id) {
@@ -92,8 +122,8 @@ export default function ProfileDetailScreen() {
       user.id === profile.id ||
       (canViewFull &&
         !(
-          myProfile?.gender === 'F' &&
-          profile.gender === 'M' &&
+          normalizeGender(myProfile?.gender) === 'F' &&
+          normalizeGender(profile.gender) === 'M' &&
           !reciprocalEnabled
         ))
 
@@ -117,7 +147,7 @@ export default function ProfileDetailScreen() {
     void unlockProfilePhoto(profile.id, 'global')
       .then((res) => {
         if (cancelled) return
-        if (res.ok || res.missingRpc) {
+        if (res.ok) {
           setPhotoAccessReady(true)
           setPhotoAccessMessage(null)
         } else {
@@ -170,8 +200,8 @@ export default function ProfileDetailScreen() {
     canViewFull &&
     photoAccessReady &&
     !(
-      myProfile?.gender === 'F' &&
-      profile.gender === 'M' &&
+      normalizeGender(myProfile?.gender) === 'F' &&
+      normalizeGender(profile.gender) === 'M' &&
       !reciprocalEnabled
     )
 
@@ -195,7 +225,7 @@ export default function ProfileDetailScreen() {
       }
       if (!convId) {
         const unlock = await unlockProfileContact(profile.id, 'global')
-        if (!unlock.ok && !unlock.missingRpc) {
+        if (!unlock.ok) {
           throw new Error(unlock.message || 'Acces contact non autorise.')
         }
         const { data: newConv, error: createErr } = await supabase
@@ -207,16 +237,6 @@ export default function ProfileDetailScreen() {
           .single()
         if (createErr) throw createErr
         convId = (newConv as { id: string }).id
-        if (unlock.missingRpc) {
-          const currentUsed = profileAccess?.contact_quota_used ?? 0
-          await supabase
-            .from('profile_access')
-            .update({
-              contact_quota_used: currentUsed + 1,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('user_id', user.id)
-        }
         await refreshProfile()
       }
       if (convId) router.push({ pathname: '/(app)/conversation/[id]', params: { id: convId } })

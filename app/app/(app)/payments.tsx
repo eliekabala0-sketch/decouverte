@@ -15,6 +15,13 @@ import { formatBoostStatusLabel } from '../../../lib/boostVisibility'
 
 type BoostTier = { days: number; label: string; amount: number }
 
+function normalizeGender(gender?: string | null) {
+  const value = String(gender ?? '').trim().toLowerCase()
+  if (['m', 'male', 'man', 'homme', 'h'].includes(value)) return 'M'
+  if (['f', 'female', 'woman', 'femme'].includes(value)) return 'F'
+  return gender ?? 'other'
+}
+
 function formatUsd(amount: number) {
   return `${amount.toFixed(2)} USD`
 }
@@ -31,16 +38,21 @@ export default function PaymentsScreen() {
 
   const reciprocal = isOn('reciprocal_matching_enabled')
   const boostFlag = isOn('boost_enabled')
+  const maleBoostRequiresReciprocity = isOn('male_boost_requires_reciprocity')
   const packsModuleOn = isOn('contact_packs_enabled')
 
   const requiresProfilesPayment = profile
-    ? GENDER_REQUIRES_PROFILES_ACCESS_PAYMENT.includes(profile.gender) || (profile.gender === 'F' && reciprocal)
+    ? GENDER_REQUIRES_PROFILES_ACCESS_PAYMENT.includes(normalizeGender(profile.gender)) ||
+      (normalizeGender(profile.gender) === 'F' && reciprocal)
     : false
   const hasProfilesAccess = profile ? canViewFullProfiles(profile.gender, profileAccess) : false
   const contactsLeft = remainingContacts(profileAccess)
   const showContactPacks =
-    !!profile && packsModuleOn && (profile.gender === 'M' || (profile.gender === 'F' && reciprocal))
-  const canBuyBoost = !!boostFlag && !!profile
+    !!profile && packsModuleOn && (normalizeGender(profile.gender) === 'M' || (normalizeGender(profile.gender) === 'F' && reciprocal))
+  const canBuyBoost =
+    !!boostFlag &&
+    !!profile &&
+    (normalizeGender(profile.gender) !== 'M' || reciprocal || !maleBoostRequiresReciprocity)
 
   const [boostTierIdx, setBoostTierIdx] = useState(0)
   const [boostPendingId, setBoostPendingId] = useState<string | null>(null)
@@ -289,13 +301,13 @@ export default function PaymentsScreen() {
       </Pressable>
       <Text style={[styles.title, { color: c.text }]}>Paiements & Packs</Text>
 
-      {profile?.gender === 'F' && !reciprocal && canBuyBoost ? renderBoostBlock({ prominent: true }) : null}
+      {normalizeGender(profile?.gender) === 'F' && !reciprocal && canBuyBoost ? renderBoostBlock({ prominent: true }) : null}
 
       {requiresProfilesPayment ? (
         <View style={[styles.card, { backgroundColor: c.surface }]}>
           <Text style={[styles.cardTitle, { color: c.text }]}>AccÃ¨s profils / photos</Text>
           <Text style={[styles.cardDesc, { color: c.textSecondary }]}>
-            {profile?.gender === 'F' && reciprocal
+            {normalizeGender(profile?.gender) === 'F' && reciprocal
               ? 'Mode rÃ©ciproque : mÃªme logique dâ€™accÃ¨s payant que pour les hommes pour voir les profils du genre recherchÃ©.'
               : 'DÃ©bloquez lâ€™affichage complet via quota photo premium ou pack (voir profile_access).'}
           </Text>
@@ -312,7 +324,7 @@ export default function PaymentsScreen() {
             <Text style={styles.btnText}>Payer avec Badiboss Pay</Text>
           </Pressable>
         </View>
-      ) : profile?.gender === 'F' ? (
+      ) : normalizeGender(profile?.gender) === 'F' ? (
         <View style={[styles.card, { backgroundColor: c.surface }]}>
           <Text style={[styles.cardTitle, { color: c.text }]}>AccÃ¨s profils / photos</Text>
           <Text style={[styles.cardDesc, { color: c.textSecondary }]}>
@@ -337,7 +349,7 @@ export default function PaymentsScreen() {
         </View>
       ) : null}
 
-      {!(profile?.gender === 'F' && !reciprocal) && canBuyBoost ? renderBoostBlock({ prominent: false }) : null}
+      {!(normalizeGender(profile?.gender) === 'F' && !reciprocal) && canBuyBoost ? renderBoostBlock({ prominent: false }) : null}
     </ScrollView>
   )
 }

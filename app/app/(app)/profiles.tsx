@@ -1,108 +1,90 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { View, Text, StyleSheet, FlatList, Pressable, ActivityIndicator } from 'react-native'
 import { useTheme } from '@/theme/ThemeContext'
 import { useAuth } from '@/contexts/AuthContext'
 import { ProfileCard } from '@/components/ProfileCard'
 import { MODES } from '../../../lib/constants'
-import { canViewFullProfiles } from '../../../lib/access'
 import { supabase } from '@/lib/supabase'
 import type { Profile } from '../../../lib/types'
-import { isProfileBoostedForListing } from '../../../lib/boostVisibility'
+import { getProfileFeed, type FeedMode } from '../../lib/profileFeedRpc'
 
-function sortBoostThenRecent(list: Profile[]): Profile[] {
-  return [...list].sort((a, b) => {
-    const score = (p: Profile) => (isProfileBoostedForListing(p) ? 1 : 0)
-    return score(b) - score(a) || new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-  })
+const PAGE_SIZE = 20
+
+function normalizeGender(gender?: string | null) {
+  const value = String(gender ?? '').trim().toLowerCase()
+  if (['m', 'male', 'man', 'homme', 'h'].includes(value)) return 'M'
+  if (['f', 'female', 'woman', 'femme'].includes(value)) return 'F'
+  return gender ?? 'other'
 }
 
 export default function ProfilesScreen() {
   const router = useRouter()
   const { colors } = useTheme()
-  const { profile: myProfile, profileAccess } = useAuth()
+  const { profile: myProfile } = useAuth()
   const { mode } = useLocalSearchParams<{ mode?: string }>()
   const [profiles, setProfiles] = useState<Profile[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
   const [reciprocalEnabled, setReciprocalEnabled] = useState(false)
+  const [page, setPage] = useState(0)
+  const [totalCount, setTotalCount] = useState(0)
+  const [hasMore, setHasMore] = useState(false)
+  const [fallbackMode, setFallbackMode] = useState(false)
 
-  const modeLabel = mode === 'serieux' ? MODES.serieux.label : MODES.libre.label
+  const feedMode: FeedMode = mode === 'serieux' ? 'serieux' : 'libre'
+  const modeLabel = feedMode === 'serieux' ? MODES.serieux.label : MODES.libre.label
 
-  useEffect(() => {
-    setLoadError(null)
-    const load = async () => {
+  const loadPage = useCallback(
+    async (nextPage: number, replace: boolean) => {
+      setLoadError(null)
+      if (replace) setLoading(true)
+      else setLoadingMore(true)
+
       try {
         const { data: setting } = await supabase
           .from('admin_settings')
           .select('value')
           .eq('key', 'reciprocal_matching_enabled')
           .maybeSingle()
-        const reciprocal = Boolean((setting as { value?: boolean } | null)?.value)
-        setReciprocalEnabled(reciprocal)
+        setReciprocalEnabled(Boolean((setting as { value?: boolean } | null)?.value))
 
-        const { data: ml } = await supabase.from('admin_settings').select('value').eq('key', 'mode_libre_enabled').maybeSingle()
-        const { data: ms } = await supabase.from('admin_settings').select('value').eq('key', 'mode_serieux_enabled').maybeSingle()
-        const libreOn = typeof (ml as { value?: boolean } | null)?.value === 'boolean' ? (ml as { value: boolean }).value : true
-        const serieuxOn = typeof (ms as { value?: boolean } | null)?.value === 'boolean' ? (ms as { value: boolean }).value : true
-        const isSerieux = mode === 'serieux'
-        if (isSerieux && !serieuxOn) {
-          setProfiles([])
-          return
-        }
-        if (!isSerieux && !libreOn) {
-          setProfiles([])
-          return
-        }
-
-        const { data, error } = await supabase
-          .from('profiles')
-          .select(
-            'id,created_at,phone,photo,gender,city,commune,bio,status,is_verified,username,age,boost_reason,boosted_until,is_boosted,country,role'
-          )
-          .eq('status', 'active')
-          .order('created_at', { ascending: false })
-        if (error) throw error
-        const list = (data ?? []) as Profile[]
-        const filteredSelf = list
-          .filter((p) => p.id !== myProfile?.id)
-          .filter((p) => {
-            const libre = p.mode_libre_active ?? true
-            const serieux = p.mode_serieux_active ?? true
-            return mode === 'serieux' ? serieux : libre
-          })
-        if (!myProfile?.gender) {
-          setProfiles(filteredSelf)
-          return
-        }
-        if (myProfile.gender === 'M') {
-          setProfiles(sortBoostThenRecent(filteredSelf.filter((p) => p.gender === 'F')))
-          return
-        }
-        if (myProfile.gender === 'F' && !reciprocal) {
-          // Femme sans réciprocité: aperçu réel de présence (liste visible), mais détails verrouillés.
-          setProfiles(sortBoostThenRecent(filteredSelf.filter((p) => p.gender === 'M')).slice(0, 24))
-          return
-        }
-        if (myProfile.gender === 'F' && reciprocal) {
-          setProfiles(sortBoostThenRecent(filteredSelf.filter((p) => p.gender === 'M')))
-          return
-        }
-        setProfiles(sortBoostThenRecent(filteredSelf))
+        const result = await getProfileFeed(feedMode, nextPage, PAGE_SIZE)
+        setFallbackMode(!!result.missingRpc)
+        setTotalCount(result.totalCount)
+        setPage(nextPage)
+        setProfiles((prev) => {
+          const next = replace ? result.profiles : [...prev, ...result.profiles]
+          setHasMore(next.length < result.totalCount && result.profiles.length > 0)
+          return next
+        })
       } catch (e: unknown) {
         setLoadError(e instanceof Error ? e.message : 'Erreur de chargement')
       } finally {
         setLoading(false)
+        setLoadingMore(false)
       }
-    }
-    load()
-  }, [myProfile?.id, myProfile?.gender, refreshKey, mode])
+    },
+    [feedMode],
+  )
 
-  const canViewFull = canViewFullProfiles(myProfile?.gender, profileAccess)
+  useEffect(() => {
+    setProfiles([])
+    setPage(0)
+    setHasMore(false)
+    void loadPage(0, true)
+  }, [loadPage, myProfile?.id, myProfile?.gender, refreshKey])
+
+  const loadMore = () => {
+    if (loading || loadingMore || !hasMore) return
+    void loadPage(page + 1, false)
+  }
+
   const onPressProfile = (id: string) => router.push(`/(app)/profile/${id}`)
 
-  if (loading) {
+  if (loading && profiles.length === 0) {
     return (
       <View style={[styles.centered, { backgroundColor: colors.background }]}>
         <ActivityIndicator size="large" color={colors.primary} />
@@ -110,12 +92,12 @@ export default function ProfilesScreen() {
     )
   }
 
-  if (loadError) {
+  if (loadError && profiles.length === 0) {
     return (
       <View style={[styles.container, styles.centered, { backgroundColor: colors.background }]}>
         <Text style={[styles.empty, { color: colors.textMuted }]}>{loadError}</Text>
-        <Pressable onPress={() => { setLoadError(null); setLoading(true); setRefreshKey((k) => k + 1); }} style={[styles.retryBtn, { backgroundColor: colors.primary }]}>
-          <Text style={styles.retryText}>Réessayer</Text>
+        <Pressable onPress={() => setRefreshKey((k) => k + 1)} style={[styles.retryBtn, { backgroundColor: colors.primary }]}>
+          <Text style={styles.retryText}>Reessayer</Text>
         </Pressable>
       </View>
     )
@@ -125,11 +107,16 @@ export default function ProfilesScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <Text style={[styles.title, { color: colors.text }]}>{modeLabel}</Text>
       <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-        {profiles.length} profil{profiles.length !== 1 ? 's' : ''}
+        {totalCount || profiles.length} profil{(totalCount || profiles.length) !== 1 ? 's' : ''}
       </Text>
-      {myProfile?.gender === 'F' && !reciprocalEnabled ? (
+      {normalizeGender(myProfile?.gender) === 'F' && !reciprocalEnabled ? (
         <Text style={[styles.subtitle, { color: colors.textMuted }]}>
-          La recherche réciproque est désactivée : aperçu des profils visible, détails complets et échanges limités.
+          La recherche reciproque est desactivee : apercu limite, details complets et echanges controles.
+        </Text>
+      ) : null}
+      {fallbackMode ? (
+        <Text style={[styles.subtitle, { color: colors.textMuted }]}>
+          Mode compatibilite : affichage limite sans donnees sensibles.
         </Text>
       ) : null}
       <FlatList
@@ -143,18 +130,21 @@ export default function ProfilesScreen() {
             <ProfileCard
               profile={item}
               canViewFull={
-                canViewFull &&
-                !(
-                  myProfile?.gender === 'F' &&
-                  item.gender === 'M' &&
-                  !reciprocalEnabled
-                )
+                !!item.can_view_full &&
+                !(normalizeGender(myProfile?.gender) === 'F' && item.gender === 'M' && !reciprocalEnabled)
               }
             />
           </Pressable>
         )}
         ListEmptyComponent={
           <Text style={[styles.empty, { color: colors.textMuted }]}>Aucun profil pour le moment.</Text>
+        }
+        onEndReached={loadMore}
+        onEndReachedThreshold={0.4}
+        refreshing={loading}
+        onRefresh={() => setRefreshKey((k) => k + 1)}
+        ListFooterComponent={
+          loadingMore ? <ActivityIndicator color={colors.primary} style={{ marginVertical: 16 }} /> : null
         }
       />
     </View>

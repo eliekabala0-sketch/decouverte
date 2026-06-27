@@ -6,6 +6,7 @@ import { FeatureGate } from '../components/FeatureGate'
 type ProfileRow = {
   id: string
   username: string
+  gender?: string | null
   boost_reason: string | null
 }
 type BoostOffer = { id: string; label: string; days: number; amount: number; active: boolean }
@@ -26,13 +27,22 @@ export function BoostsPage() {
   const [reason, setReason] = useState<typeof BOOST_REASONS[number]['value']>('admin')
   const [offers, setOffers] = useState<BoostOffer[]>([])
   const [savingOffers, setSavingOffers] = useState(false)
+  const [reciprocalEnabled, setReciprocalEnabled] = useState(false)
+  const [maleBoostRequiresReciprocity, setMaleBoostRequiresReciprocity] = useState(true)
+
+  const normalizeGender = (gender?: string | null) => {
+    const value = String(gender ?? '').trim().toLowerCase()
+    if (['m', 'male', 'man', 'homme', 'h'].includes(value)) return 'M'
+    if (['f', 'female', 'woman', 'femme'].includes(value)) return 'F'
+    return gender ?? 'other'
+  }
 
   const load = async () => {
     setPageError(null)
     try {
       const [r1, r2] = await Promise.all([
-        supabase.from('profiles').select('id, username, boost_reason').not('boost_reason', 'is', null),
-        supabase.from('profiles').select('id, username').eq('status', 'active').order('username'),
+        supabase.from('profiles').select('id, username, gender, boost_reason').not('boost_reason', 'is', null),
+        supabase.from('profiles').select('id, username, gender, boost_reason').eq('status', 'active').order('username'),
       ])
       if (r1.error || r2.error) {
         const msg = r1.error?.message || r2.error?.message || 'Erreur de chargement des mises en avant.'
@@ -68,6 +78,14 @@ export function BoostsPage() {
       } else {
         setOffers([])
       }
+      const { data: ruleRows } = await supabase
+        .from('admin_settings')
+        .select('key,value')
+        .in('key', ['reciprocal_matching_enabled', 'male_boost_requires_reciprocity'])
+      for (const row of (ruleRows ?? []) as Array<{ key: string; value: unknown }>) {
+        if (row.key === 'reciprocal_matching_enabled') setReciprocalEnabled(Boolean(row.value))
+        if (row.key === 'male_boost_requires_reciprocity') setMaleBoostRequiresReciprocity(Boolean(row.value))
+      }
     } catch (e) {
       console.error('[admin-boosts] load exception', e)
       setPageError(e instanceof Error ? e.message : 'Erreur de chargement des mises en avant.')
@@ -82,6 +100,15 @@ export function BoostsPage() {
 
   const addBoost = async () => {
     if (!selectedId) return
+    const selected = allProfiles.find((p) => p.id === selectedId)
+    if (
+      normalizeGender(selected?.gender) === 'M' &&
+      maleBoostRequiresReciprocity &&
+      !reciprocalEnabled
+    ) {
+      setPageError('Boost homme bloque : activez la recherche reciproque ou modifiez la regle P1.')
+      return
+    }
     const { error } = await supabase.from('profiles').update({ boost_reason: reason }).eq('id', selectedId)
     if (error) {
       console.error('[admin-boosts] add error', error)
@@ -160,7 +187,7 @@ export function BoostsPage() {
               <select value={selectedId} onChange={(e) => setSelectedId(e.target.value)}>
                 <option value="">— Choisir —</option>
                 {allProfiles.map((p) => (
-                  <option key={p.id} value={p.id}>{p.username}</option>
+                  <option key={p.id} value={p.id}>{p.username} ({normalizeGender(p.gender)})</option>
                 ))}
               </select>
             </div>
