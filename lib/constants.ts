@@ -6,7 +6,7 @@
  * - Femme (F) : inscription libre.
  * - Paiement 1 = accès profils 30 jours (PROFILES_ACCESS_DAYS).
  * - Paiement 2 = packs contacts, quotas modifiables par l'admin (DEFAULT_CONTACT_QUOTAS).
- * - Moteur paiement prévu : Badiboss Pay.
+ * - Moteur paiement côté serveur, jamais activé directement par le client.
  */
 
 export const APP_NAME = 'Découverte'
@@ -14,7 +14,7 @@ export const APP_NAME = 'Découverte'
 /** Genre(s) pour lesquels l'accès aux profils/photos est conditionné par un paiement (paiement 1). */
 export const GENDER_REQUIRES_PROFILES_ACCESS_PAYMENT: readonly string[] = ['M']
 
-/** Moteur de paiement prévu (Badiboss Pay). */
+/** Identifiant interne historique de passerelle. Ne pas afficher côté utilisateur. */
 export const PAYMENT_PROVIDER_BADIBOSS = 'badiboss_pay' as const
 
 /** Devise unique pour tous les prix (packs, paiements, boosts). */

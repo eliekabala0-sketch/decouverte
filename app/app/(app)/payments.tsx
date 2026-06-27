@@ -14,6 +14,7 @@ import {
 import { formatBoostStatusLabel } from '../../../lib/boostVisibility'
 
 type BoostTier = { days: number; label: string; amount: number }
+const PAYMENT_CHANNEL_LABEL = 'Paiement securise'
 
 function normalizeGender(gender?: string | null) {
   const value = String(gender ?? '').trim().toLowerCase()
@@ -104,7 +105,6 @@ export default function PaymentsScreen() {
         .select('id')
         .eq('user_id', user.id)
         .eq('provider', PAYMENT_PROVIDER_VISIBILITY_BOOST)
-        .eq('payment_provider', 'Badiboss Pay')
         .eq('status', 'pending')
         .order('created_at', { ascending: false })
         .limit(1)
@@ -123,8 +123,8 @@ export default function PaymentsScreen() {
         user_id: user.id,
         amount: 0,
         currency: 'USD',
-        payment_method: 'Badiboss Pay',
-        payment_provider: 'Badiboss Pay',
+        payment_method: 'secure_checkout',
+        payment_provider: 'secure_checkout',
         provider: 'profiles_access',
         transaction_ref: makeTransactionRef('profiles'),
         status: 'pending',
@@ -133,12 +133,12 @@ export default function PaymentsScreen() {
           all_profiles_access: true,
         },
       })
-      if (payErr) throw new Error(payErr.message || payErr.code || 'Ã‰chec enregistrement paiement')
+      if (payErr) throw new Error(payErr.message || payErr.code || 'Echec enregistrement paiement')
 
       await refreshProfile()
-      Alert.alert('Commande crÃ©Ã©e', 'AprÃ¨s confirmation Badiboss Pay, lâ€™accÃ¨s sera activÃ© automatiquement par le serveur.')
+      Alert.alert('Commande creee', "Apres confirmation du paiement, l'acces sera active automatiquement par le serveur.")
     } catch (e: unknown) {
-      Alert.alert('Paiement', e instanceof Error ? e.message : "Impossible d'activer l'accÃ¨s.")
+      Alert.alert('Paiement', e instanceof Error ? e.message : "Impossible d'activer l'acces.")
     }
   }
 
@@ -154,8 +154,8 @@ export default function PaymentsScreen() {
           user_id: user.id,
           amount: tier.amount,
           currency: 'USD',
-          payment_method: 'Badiboss Pay',
-          payment_provider: 'Badiboss Pay',
+          payment_method: 'secure_checkout',
+          payment_provider: 'secure_checkout',
           provider: PAYMENT_PROVIDER_VISIBILITY_BOOST,
           transaction_ref: makeTransactionRef('boost'),
           status: 'pending',
@@ -167,15 +167,15 @@ export default function PaymentsScreen() {
         })
         .select('id')
         .single()
-      if (error) throw new Error(error.message || error.code || 'Ã‰chec crÃ©ation commande boost')
+      if (error) throw new Error(error.message || error.code || 'Echec creation commande boost')
       const id = (data as { id: string }).id
       setBoostPendingId(id)
       Alert.alert(
-        'Commande crÃ©Ã©e',
-        `Montant : ${formatUsd(tier.amount)}. AprÃ¨s paiement sur Badiboss Pay, appuyez sur Â« Confirmer le paiement Â».`
+        'Commande creee',
+        `Montant : ${formatUsd(tier.amount)}. Apres paiement, appuyez sur Confirmer le paiement.`
       )
     } catch (e: unknown) {
-      Alert.alert('Boost', e instanceof Error ? e.message : 'Impossible de crÃ©er la commande.')
+      Alert.alert('Boost', e instanceof Error ? e.message : 'Impossible de creer la commande.')
     } finally {
       setBoostBusy(false)
     }
@@ -200,15 +200,15 @@ export default function PaymentsScreen() {
       if (!row || (row.status !== 'pending' && row.status !== 'completed')) {
         throw new Error('Aucune commande boost en attente pour ce compte.')
       }
-      if (row.provider !== PAYMENT_PROVIDER_VISIBILITY_BOOST || row.payment_provider !== 'Badiboss Pay') {
-        throw new Error('Cette commande nâ€™est pas une mise en avant valide.')
+      if (row.provider !== PAYMENT_PROVIDER_VISIBILITY_BOOST) {
+        throw new Error("Cette commande n'est pas une mise en avant valide.")
       }
       await refreshProfile()
       if (row.status === 'completed') {
         setBoostPendingId(null)
-        Alert.alert('Boost activÃ©', 'Le paiement a Ã©tÃ© confirmÃ© par le serveur.')
+        Alert.alert('Boost active', 'Le paiement a ete confirme par le serveur.')
       } else {
-        Alert.alert('Paiement en attente', 'La confirmation Badiboss Pay nâ€™est pas encore reÃ§ue par le serveur.')
+        Alert.alert('Paiement en attente', "La confirmation n'est pas encore recue par le serveur.")
       }
     } catch (e: unknown) {
       Alert.alert('Boost', e instanceof Error ? e.message : 'Confirmation impossible.')
@@ -232,12 +232,12 @@ export default function PaymentsScreen() {
       >
         <Text style={[styles.cardTitle, { color: c.text }]}>Mise en avant publicitaire (boost)</Text>
         <Text style={[styles.cardDesc, { color: c.textSecondary }]}>
-          Campagne payante : choisissez la durÃ©e, crÃ©ez la commande, payez sur Badiboss, puis confirmez ici pour
-          activer la visibilitÃ© (listes + badge). Aucune activation sans confirmation de paiement.
+          Campagne payante : choisissez la duree, creez la commande, puis confirmez ici apres paiement pour
+          activer la visibilite (listes + badge). Aucune activation sans confirmation serveur.
         </Text>
-        <Text style={[styles.status, { color: c.textMuted }]}>Ã‰tat : {formatBoostStatusLabel(profile)}</Text>
+        <Text style={[styles.status, { color: c.textMuted }]}>Etat : {formatBoostStatusLabel(profile)}</Text>
 
-        <Text style={[styles.tierLabel, { color: c.text }]}>DurÃ©e</Text>
+        <Text style={[styles.tierLabel, { color: c.text }]}>Duree</Text>
         <View style={styles.tierRow}>
           {boostTiers.map((t, i) => (
             <Pressable
@@ -257,13 +257,13 @@ export default function PaymentsScreen() {
           ))}
         </View>
         <Text style={[styles.priceLine, { color: c.text }]}>
-          Total Ã  payer : {formatUsd(tier.amount)} â€” {tier.label}
+          Total a payer : {formatUsd(tier.amount)} - {tier.label}
         </Text>
 
         {boostPendingId ? (
           <View style={{ gap: 10 }}>
             <Text style={[styles.cardDesc, { color: c.warning }]}>
-              Commande en attente de paiement. AprÃ¨s Badiboss Pay, confirmez pour activer le boost.
+              Commande en attente de paiement. Confirmez apres paiement pour activer le boost.
             </Text>
             <Pressable
               onPress={confirmBoostPayment}
@@ -273,7 +273,7 @@ export default function PaymentsScreen() {
               {boostBusy ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <Text style={styles.btnText}>Confirmer le paiement (aprÃ¨s Badiboss)</Text>
+                <Text style={styles.btnText}>Confirmer le paiement</Text>
               )}
             </Pressable>
           </View>
@@ -286,7 +286,7 @@ export default function PaymentsScreen() {
             {boostBusy ? (
               <ActivityIndicator color="#fff" />
             ) : (
-              <Text style={styles.btnText}>CrÃ©er la commande et payer sur Badiboss</Text>
+              <Text style={styles.btnText}>Creer la commande</Text>
             )}
           </Pressable>
         )}
@@ -300,36 +300,37 @@ export default function PaymentsScreen() {
         <Text style={{ color: c.primary, fontWeight: '600' }}>Retour</Text>
       </Pressable>
       <Text style={[styles.title, { color: c.text }]}>Paiements & Packs</Text>
+      <Text style={[styles.subtitle, { color: c.textSecondary }]}>{PAYMENT_CHANNEL_LABEL}</Text>
 
       {normalizeGender(profile?.gender) === 'F' && !reciprocal && canBuyBoost ? renderBoostBlock({ prominent: true }) : null}
 
       {requiresProfilesPayment ? (
         <View style={[styles.card, { backgroundColor: c.surface }]}>
-          <Text style={[styles.cardTitle, { color: c.text }]}>AccÃ¨s profils / photos</Text>
+          <Text style={[styles.cardTitle, { color: c.text }]}>Acces profils / photos</Text>
           <Text style={[styles.cardDesc, { color: c.textSecondary }]}>
             {normalizeGender(profile?.gender) === 'F' && reciprocal
-              ? 'Mode rÃ©ciproque : mÃªme logique dâ€™accÃ¨s payant que pour les hommes pour voir les profils du genre recherchÃ©.'
-              : 'DÃ©bloquez lâ€™affichage complet via quota photo premium ou pack (voir profile_access).'}
+              ? "Mode reciproque : meme logique d'acces payant que pour les hommes pour voir les profils du genre recherche."
+              : "Debloquez l'affichage complet via quota photo premium ou pack (voir profile_access)."}
           </Text>
           {profile ? (
             <Text style={[styles.status, { color: hasProfilesAccess ? c.success : c.textMuted }]}>
               {hasProfilesAccess
                 ? profileAccess?.all_profiles_access
-                  ? 'AccÃ¨s premium actif'
-                  : `Quota photos utilisÃ© : ${profileAccess?.photo_quota_used ?? 0} / ${profileAccess?.photo_quota ?? 0}`
+                  ? 'Acces premium actif'
+                  : `Quota photos utilise : ${profileAccess?.photo_quota_used ?? 0} / ${profileAccess?.photo_quota ?? 0}`
                 : 'Non actif'}
             </Text>
           ) : null}
           <Pressable onPress={buyProfilesAccess} style={[styles.btn, { backgroundColor: c.primary }]}>
-            <Text style={styles.btnText}>Payer avec Badiboss Pay</Text>
+            <Text style={styles.btnText}>Creer la commande</Text>
           </Pressable>
         </View>
       ) : normalizeGender(profile?.gender) === 'F' ? (
         <View style={[styles.card, { backgroundColor: c.surface }]}>
-          <Text style={[styles.cardTitle, { color: c.text }]}>AccÃ¨s profils / photos</Text>
+          <Text style={[styles.cardTitle, { color: c.text }]}>Acces profils / photos</Text>
           <Text style={[styles.cardDesc, { color: c.textSecondary }]}>
-            Sans rÃ©ciprocitÃ©, vous nâ€™achetez pas lâ€™accÃ¨s Â« type homme Â». Utilisez la mise en avant ci-dessus pour la
-            visibilitÃ©.
+            Sans reciprocite, vous n'achetez pas l'acces type homme. Utilisez la mise en avant ci-dessus pour la
+            visibilite.
           </Text>
         </View>
       ) : null}
@@ -338,7 +339,7 @@ export default function PaymentsScreen() {
         <View style={[styles.card, { backgroundColor: c.surface }]}>
           <Text style={[styles.cardTitle, { color: c.text }]}>Packs contacts</Text>
           <Text style={[styles.cardDesc, { color: c.textSecondary }]}>
-            Quotas contacts + options photo selon le pack (parcours homme, ou femme si rÃ©ciprocitÃ© activÃ©e).
+            Quotas contacts + options photo selon le pack (parcours homme, ou femme si reciprocite activee).
           </Text>
           <Text style={[styles.status, { color: contactsLeft > 0 ? c.textSecondary : c.warning }]}>
             {contactsLeft > 0 ? `Contacts restants : ${contactsLeft}` : 'Quota atteint : achat requis'}
@@ -358,6 +359,7 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   content: { padding: 24, paddingTop: 56, paddingBottom: 40 },
   title: { fontSize: 26, fontWeight: '700', marginBottom: 24 },
+  subtitle: { fontSize: 14, marginTop: -12, marginBottom: 18 },
   card: {
     padding: 20,
     borderRadius: 16,

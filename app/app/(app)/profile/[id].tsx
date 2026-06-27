@@ -20,6 +20,7 @@ import type { Profile } from '../../../../lib/types'
 import { getProfilePrivateDetails } from '../../../lib/profilePrivateDetailsRpc'
 import { listProfilePhotos, type ProfilePhotoRow } from '../../../lib/profilePhotos'
 import { unlockProfileContact, unlockProfilePhoto } from '../../../lib/profileAccessRpc'
+import { blockProfile } from '../../../lib/profileModerationRpc'
 
 function normalizeGender(gender?: string | null) {
   const value = String(gender ?? '').trim().toLowerCase()
@@ -39,6 +40,7 @@ export default function ProfileDetailScreen() {
   const [loading, setLoading] = useState(!!params.id)
   const [openingChat, setOpeningChat] = useState(false)
   const [reporting, setReporting] = useState(false)
+  const [blocking, setBlocking] = useState(false)
   const [photos, setPhotos] = useState<ProfilePhotoRow[]>([])
   const [reciprocalEnabled, setReciprocalEnabled] = useState(false)
   const [photoAccessReady, setPhotoAccessReady] = useState(false)
@@ -285,21 +287,61 @@ export default function ProfileDetailScreen() {
     )
   }
 
+  const hideProfile = async () => {
+    if (!profile?.id || blocking) return
+    Alert.alert(
+      'Masquer ce profil',
+      "Ce profil n'apparaitra plus dans votre recherche. Vous pouvez aussi le signaler si necessaire.",
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Masquer',
+          style: 'destructive',
+          onPress: async () => {
+            setBlocking(true)
+            try {
+              await blockProfile(profile.id)
+              Alert.alert('Profil masque', "Ce profil n'apparaitra plus dans votre feed.")
+              router.back()
+            } catch (e: any) {
+              Alert.alert('Erreur', e?.message ?? 'Impossible de masquer ce profil.')
+            } finally {
+              setBlocking(false)
+            }
+          },
+        },
+      ]
+    )
+  }
+
   return (
     <ScrollView style={[styles.container, { backgroundColor: colors.background }]} contentContainerStyle={styles.content}>
       <Pressable onPress={() => router.back()} style={styles.back}>
         <Text style={{ color: colors.primary, fontWeight: '600' }}>Retour</Text>
       </Pressable>
-      {canViewTargetFull && profile && reportOn ? (
-        <Pressable
-          onPress={reportProfile}
-          disabled={reporting}
-          style={[styles.reportBtn, { borderColor: colors.border }]}
-        >
-          <Text style={[styles.reportBtnText, { color: colors.textMuted }]}>
-            {reporting ? 'Envoi…' : 'Signaler ce profil'}
-          </Text>
-        </Pressable>
+      {profile && reportOn ? (
+        <View style={styles.moderationRow}>
+          <Pressable
+            onPress={hideProfile}
+            disabled={blocking}
+            style={[styles.reportBtn, { borderColor: colors.border }]}
+          >
+            <Text style={[styles.reportBtnText, { color: colors.textMuted }]}>
+              {blocking ? 'Masquage...' : 'Masquer'}
+            </Text>
+          </Pressable>
+          {canViewTargetFull ? (
+            <Pressable
+              onPress={reportProfile}
+              disabled={reporting}
+              style={[styles.reportBtn, { borderColor: colors.border }]}
+            >
+              <Text style={[styles.reportBtnText, { color: colors.textMuted }]}>
+                {reporting ? 'Envoi...' : 'Signaler'}
+              </Text>
+            </Pressable>
+          ) : null}
+        </View>
       ) : null}
       {canViewTargetFull ? (
         <>
@@ -404,6 +446,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     marginBottom: 16,
   },
+  moderationRow: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginBottom: 16 },
   reportBtnText: { fontSize: 14 },
   gallery: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   galleryPhoto: { width: 90, height: 90, borderRadius: 8 },

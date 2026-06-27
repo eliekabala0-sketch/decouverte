@@ -248,8 +248,8 @@ create table if not exists public.ad_campaigns (
 
 create table if not exists public.reports (
   id uuid primary key default uuid_generate_v4(),
-  reporter_id uuid not null references auth.users(id) on delete cascade,
-  reported_id uuid not null references public.profiles(id) on delete cascade,
+  reporter_id uuid references auth.users(id) on delete cascade,
+  reported_id uuid references public.profiles(id) on delete cascade,
   type text,
   reason text,
   status text not null default 'pending' check (status in ('pending', 'reviewed', 'resolved', 'dismissed')),
@@ -257,6 +257,26 @@ create table if not exists public.reports (
   resolved_at timestamptz,
   resolved_by uuid references auth.users(id)
 );
+
+create table if not exists public.blocked_profiles (
+  id uuid primary key default uuid_generate_v4(),
+  blocker_id uuid not null references auth.users(id) on delete cascade,
+  blocked_profile_id uuid not null references public.profiles(id) on delete cascade,
+  reason text,
+  created_at timestamptz not null default now(),
+  unique (blocker_id, blocked_profile_id)
+);
+
+create index if not exists idx_blocked_profiles_blocker
+  on public.blocked_profiles(blocker_id, created_at desc);
+create index if not exists idx_blocked_profiles_blocked
+  on public.blocked_profiles(blocked_profile_id, created_at desc);
+create index if not exists idx_reports_reporter_id
+  on public.reports(reporter_id);
+create index if not exists idx_reports_reported_id
+  on public.reports(reported_id);
+create index if not exists idx_reports_status_created_at
+  on public.reports(status, created_at desc);
 
 create table if not exists public.mass_messages (
   id uuid primary key default uuid_generate_v4(),
@@ -308,6 +328,11 @@ insert into public.admin_settings (key, value) values
   ('feed_default_page_size', '20'),
   ('feed_max_page_size', '50'),
   ('male_boost_requires_reciprocity', 'true'),
+  ('feed_score_boost_weight', '100'),
+  ('feed_score_verified_weight', '15'),
+  ('feed_score_complete_weight', '20'),
+  ('feed_score_recent_weight', '10'),
+  ('feed_score_serious_mode_weight', '8'),
   ('match_required_enabled', 'false'),
   ('badges_enabled', 'true'),
   ('profile_verification_enabled', 'true'),
@@ -406,6 +431,11 @@ declare
   female_limit integer := 24;
   default_size integer := 20;
   max_size integer := 50;
+  score_boost integer := 100;
+  score_verified integer := 15;
+  score_complete integer := 20;
+  score_recent integer := 10;
+  score_serious_mode integer := 8;
   effective_page integer := greatest(coalesce(p_page, 0), 0);
   effective_size integer;
   effective_mode text := case when p_mode = 'serieux' then 'serieux' else 'libre' end;
@@ -438,6 +468,16 @@ begin
     into default_size;
   select greatest(coalesce((select (value #>> '{}')::integer from public.admin_settings where key = 'feed_max_page_size'), 50), 1)
     into max_size;
+  select coalesce((select (value #>> '{}')::integer from public.admin_settings where key = 'feed_score_boost_weight'), 100)
+    into score_boost;
+  select coalesce((select (value #>> '{}')::integer from public.admin_settings where key = 'feed_score_verified_weight'), 15)
+    into score_verified;
+  select coalesce((select (value #>> '{}')::integer from public.admin_settings where key = 'feed_score_complete_weight'), 20)
+    into score_complete;
+  select coalesce((select (value #>> '{}')::integer from public.admin_settings where key = 'feed_score_recent_weight'), 10)
+    into score_recent;
+  select coalesce((select (value #>> '{}')::integer from public.admin_settings where key = 'feed_score_serious_mode_weight'), 8)
+    into score_serious_mode;
 
   effective_size := least(greatest(coalesce(p_page_size, default_size), 1), max_size);
 
@@ -465,6 +505,11 @@ begin
     from public.profiles pr
     where pr.id <> viewer
       and pr.status = 'active'
+      and not exists (
+        select 1 from public.blocked_profiles bp
+        where (bp.blocker_id = viewer and bp.blocked_profile_id = pr.id)
+           or (bp.blocker_id = pr.id and bp.blocked_profile_id = viewer)
+      )
       and (
         (effective_mode = 'serieux' and coalesce(pr.mode_serieux_active, true))
         or (effective_mode = 'libre' and coalesce(pr.mode_libre_active, true))
@@ -486,9 +531,37 @@ begin
           or not male_boost_needs_reciprocity
         )
       ) as effective_boost,
+      (
+        case when (
+          c.raw_boost
+          and (
+            c.normalized_gender = 'F'
+            or reciprocal_enabled
+            or not male_boost_needs_reciprocity
+          )
+        ) then score_boost else 0 end
+        + case when coalesce(c.is_verified, false) then score_verified else 0 end
+        + case when coalesce(nullif(c.bio, ''), null) is not null and coalesce(nullif(c.photo, ''), null) is not null then score_complete else 0 end
+        + case when c.created_at::timestamptz >= now() - interval '14 days' then score_recent else 0 end
+        + case when effective_mode = 'serieux' and coalesce(c.mode_serieux_active, false) then score_serious_mode else 0 end
+      ) as visibility_score,
       count(*) over () as full_count,
       row_number() over (
         order by
+          (
+            case when (
+              c.raw_boost
+              and (
+                c.normalized_gender = 'F'
+                or reciprocal_enabled
+                or not male_boost_needs_reciprocity
+              )
+            ) then score_boost else 0 end
+            + case when coalesce(c.is_verified, false) then score_verified else 0 end
+            + case when coalesce(nullif(c.bio, ''), null) is not null and coalesce(nullif(c.photo, ''), null) is not null then score_complete else 0 end
+            + case when c.created_at::timestamptz >= now() - interval '14 days' then score_recent else 0 end
+            + case when effective_mode = 'serieux' and coalesce(c.mode_serieux_active, false) then score_serious_mode else 0 end
+          ) desc,
           (
             c.raw_boost
             and (
@@ -625,6 +698,103 @@ begin
 end;
 $$;
 
+create or replace function public.block_profile(
+  p_target_profile_id uuid,
+  p_reason text default null
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  blocker uuid := auth.uid();
+  block_id uuid;
+begin
+  if blocker is null then
+    raise exception 'authenticated user required';
+  end if;
+
+  if blocker = p_target_profile_id then
+    raise exception 'cannot block own profile';
+  end if;
+
+  if not exists (
+    select 1 from public.profiles p
+    where p.id = p_target_profile_id
+  ) then
+    raise exception 'target profile unavailable';
+  end if;
+
+  insert into public.blocked_profiles (blocker_id, blocked_profile_id, reason)
+  values (blocker, p_target_profile_id, p_reason)
+  on conflict (blocker_id, blocked_profile_id)
+  do update set reason = excluded.reason
+  returning id into block_id;
+
+  return block_id;
+end;
+$$;
+
+create or replace function public.unblock_profile(
+  p_target_profile_id uuid
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  blocker uuid := auth.uid();
+begin
+  if blocker is null then
+    raise exception 'authenticated user required';
+  end if;
+
+  delete from public.blocked_profiles
+  where blocker_id = blocker
+    and blocked_profile_id = p_target_profile_id;
+
+  return true;
+end;
+$$;
+
+create or replace function public.set_profile_moderation_status(
+  p_profile_id uuid,
+  p_status text,
+  p_reason text default null
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.is_profiles_admin() then
+    raise exception 'admin role required';
+  end if;
+
+  if p_status not in ('active', 'suspended', 'banned') then
+    raise exception 'invalid profile status';
+  end if;
+
+  update public.profiles
+  set status = p_status
+  where id = p_profile_id;
+
+  perform public.log_admin_audit(
+    'set_profile_moderation_status',
+    'profiles',
+    p_profile_id::text,
+    p_profile_id,
+    p_reason,
+    jsonb_build_object('status', p_status)
+  );
+
+  return true;
+end;
+$$;
+
 create or replace function public.can_access_profile_photos(viewer_id uuid, target_user_id uuid)
 returns boolean
 language sql
@@ -677,6 +847,7 @@ alter table public.messages enable row level security;
 alter table public.public_publications enable row level security;
 alter table public.ad_campaigns enable row level security;
 alter table public.reports enable row level security;
+alter table public.blocked_profiles enable row level security;
 alter table public.mass_messages enable row level security;
 alter table public.admin_settings enable row level security;
 alter table public.audit_events enable row level security;

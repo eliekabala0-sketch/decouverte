@@ -21,7 +21,7 @@
 - **Profils** : liste par mode (Libre/Sérieux), profils boostés en premier, détail profil, déblocage contact / envoi message (quota).
 - **Publications / Campagnes** : affichage des contenus actifs (texte, image, vidéo selon le cas).
 - **Messages** : liste des conversations, ouverture conversation, envoi/réception (temps réel si activé).
-- **Packs / Paiements** : affichage packs en USD, simulation achat (à remplacer par Badiboss Pay en prod).
+- **Packs / Paiements** : affichage packs en USD, activation serveur par webhook en prod.
 - **Compte** : déconnexion, édition profil si prévu.
 - Tester sur téléphone et desktop (responsive / PWA si applicable).
 
@@ -30,8 +30,8 @@
 - Si une table n’existe pas : exécuter la migration de création correspondante (ex. 002 pour contact_packs, public_publications, mass_messages, admin_settings ; 006 pour ad_campaigns).
 - Upload médias (images/vidéos) : bucket **admin-media** et politique de lecture publique.
 
-### 4. Paiement réel (Badiboss Pay)
-- Remplacer la simulation par l’intégration Badiboss Pay (initiation paiement, webhook, mise à jour `payments` et `profile_access` / quotas).
+### 4. Paiement réel
+- Remplacer la simulation par l’intégration paiement serveur (initiation paiement, webhook, mise à jour `payments` et `profile_access` / quotas).
 - Tester en staging avec des montants réels ou sandbox si disponible.
 
 ### 5. Signalements (côté app)
@@ -48,7 +48,7 @@
 
 ### 8. Déploiement et livraison
 - Build production : app (Expo/React Native), admin (Vite).
-- Variables d’environnement (Supabase URL/keys, Badiboss si applicable).
+- Variables d’environnement (Supabase URL/keys, passerelle paiement si applicable).
 - Hébergement admin + déploiement app (stores ou lien web).
 - Documentation courte : démarrage projet, exécution des migrations, configuration env.
 

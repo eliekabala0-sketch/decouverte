@@ -1,25 +1,27 @@
 /**
- * Préparation intégration Badiboss Pay — Découverte
- * Ne pas commiter de clés réelles. Utiliser les variables d'environnement en production.
+ * Preparation integration paiement serveur - Decouverte.
+ * Ne pas committer de cles reelles. Utiliser les variables d'environnement en production.
  */
 
 import { PAYMENT_PROVIDER_BADIBOSS } from './constants'
 
 export const BADIBOSS_PROVIDER = PAYMENT_PROVIDER_BADIBOSS
 
-/** URL de base de l'API Badiboss Pay (à configurer via env). */
+/** URL de base de l'API paiement, a configurer via env. */
 export const BADIBOSS_API_BASE =
-  typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_BADIBOSS_API_BASE
+  typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_PAYMENT_API_BASE
+    ? process.env.EXPO_PUBLIC_PAYMENT_API_BASE
+    : typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_BADIBOSS_API_BASE
     ? process.env.EXPO_PUBLIC_BADIBOSS_API_BASE
     : ''
 
-/** Webhook Supabase / Edge pour recevoir les callbacks Badiboss (à configurer). */
+/** Webhook Supabase / Edge pour recevoir les callbacks paiement. */
 export const BADIBOSS_WEBHOOK_PATH = '/api/webhooks/badiboss'
 
 /**
- * Pour finaliser l'intégration :
- * 1. Configurer EXPO_PUBLIC_BADIBOSS_API_BASE (app) et clé API côté serveur.
- * 2. Créer une route webhook (Supabase Edge ou backend) qui reçoit les callbacks,
- *    vérifie la signature, met à jour payments et profile_access (quotas / all_profiles_access selon schéma).
- * 3. Remplacer les appels simulés dans payments.tsx et packs.tsx par des appels à l'API Badiboss.
+ * Pour finaliser l'integration:
+ * 1. Configurer l'URL publique app et la cle API cote serveur.
+ * 2. Creer une route webhook qui recoit les callbacks, verifie la signature,
+ *    met a jour payments et profile_access.
+ * 3. Remplacer les appels simules dans payments.tsx et packs.tsx par des appels a l'API serveur.
  */

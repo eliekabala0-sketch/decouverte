@@ -57,8 +57,8 @@ export default function PacksScreen() {
         user_id: user.id,
         amount: Number((pack.price_cents / 100).toFixed(2)),
         currency: pack.currency,
-        payment_method: 'Badiboss Pay',
-        payment_provider: 'Badiboss Pay',
+        payment_method: 'secure_checkout',
+        payment_provider: 'secure_checkout',
         provider: 'contact_pack',
         transaction_ref: makeTransactionRef('pack'),
         status: 'pending',
@@ -71,10 +71,10 @@ export default function PacksScreen() {
           all_profiles_access: !!pack.all_profiles_access,
         },
       })
-      if (payErr) throw new Error(payErr.message || payErr.code || 'Ã‰chec enregistrement paiement')
+      if (payErr) throw new Error(payErr.message || payErr.code || 'Echec enregistrement paiement')
 
       await refreshProfile()
-      Alert.alert('Commande crÃ©Ã©e', `AprÃ¨s confirmation Badiboss Pay, +${addContacts} contact(s) seront ajoutÃ©s par le serveur.`)
+      Alert.alert('Commande creee', `Apres confirmation du paiement, +${addContacts} contact(s) seront ajoutes par le serveur.`)
     } catch (e: any) {
       Alert.alert('Paiement', e?.message ?? 'Impossible de finaliser le paiement.')
     } finally {
@@ -89,7 +89,7 @@ export default function PacksScreen() {
           <Text style={{ color: colors.primary, fontWeight: '600' }}>Retour</Text>
         </Pressable>
         <Text style={[styles.title, { color: colors.text }]}>Packs contacts</Text>
-        <Text style={[styles.subtitle, { color: colors.textMuted }]}>Module dÃ©sactivÃ© dans lâ€™administration.</Text>
+        <Text style={[styles.subtitle, { color: colors.textMuted }]}>Module desactive dans l'administration.</Text>
       </ScrollView>
     )
   }
@@ -102,11 +102,11 @@ export default function PacksScreen() {
         </Pressable>
         <Text style={[styles.title, { color: colors.text }]}>Packs contacts</Text>
         <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-          Les packs contacts sont prÃ©vus pour le parcours standard homme (dÃ©bloquer des prises de contact). Sans rÃ©ciprocitÃ©
-          activÃ©e par lâ€™admin, ce nâ€™est pas lâ€™offre principale cÃ´tÃ© femme.
+          Les packs contacts sont prevus pour le parcours standard homme (debloquer des prises de contact). Sans reciprocite
+          activee par l'admin, ce n'est pas l'offre principale cote femme.
         </Text>
         <Pressable onPress={() => router.replace('/(app)/payments')} style={[styles.buyBtn, { backgroundColor: colors.primary, marginTop: 20, alignSelf: 'flex-start' }]}>
-          <Text style={styles.buyBtnText}>Aller Ã  la mise en avant</Text>
+          <Text style={styles.buyBtnText}>Aller a la mise en avant</Text>
         </Pressable>
       </ScrollView>
     )
@@ -134,7 +134,7 @@ export default function PacksScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={[styles.cardTitle, { color: colors.text }]}>{p.name}</Text>
                 <Text style={[styles.cardDesc, { color: colors.textSecondary }]}>
-                  {p.contact_quota ?? p.quota} contact(s) â€¢ {formatPriceUsd(p.price_cents, p.currency)}
+                  {p.contact_quota ?? p.quota} contact(s) - {formatPriceUsd(p.price_cents, p.currency)}
                 </Text>
               </View>
               <Pressable
@@ -151,7 +151,7 @@ export default function PacksScreen() {
           ))}
           {packs.length === 0 && (
             <Text style={[styles.empty, { color: colors.textMuted }]}>
-              Aucun pack actif pour le moment (Ã  configurer cÃ´tÃ© admin).
+              Aucun pack actif pour le moment (a configurer cote admin).
             </Text>
           )}
         </View>

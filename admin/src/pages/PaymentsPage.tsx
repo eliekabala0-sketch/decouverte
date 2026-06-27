@@ -32,7 +32,7 @@ export function PaymentsPage() {
   return (
     <div>
       <h1 className="page-title">Paiements</h1>
-      <p className="page-subtitle">Gérer les paiements et statuts. Intégration Badiboss Pay à brancher.</p>
+      <p className="page-subtitle">Gerer les paiements, statuts et activations serveur.</p>
       <div className="table-wrap">
         <table className="data-table">
           <thead>
@@ -44,20 +44,20 @@ export function PaymentsPage() {
             </tr>
           </thead>
           <tbody>
-            {payments.length === 0 && (
+            {payments.length === 0 ? (
               <tr><td colSpan={4}>Aucun paiement.</td></tr>
-            )}
+            ) : null}
             {payments.map((p) => (
               <tr key={p.id}>
-                <td>{p.type ?? p.provider ?? '—'}</td>
+                <td>{p.type ?? p.provider ?? '-'}</td>
                 <td>
                   {typeof p.amount_cents === 'number'
                     ? `${(p.amount_cents / 100).toFixed(2)} ${p.currency ?? 'USD'}`
                     : typeof p.amount === 'number'
                       ? `${p.amount} ${p.currency ?? 'USD'}`
-                      : '—'}
+                      : '-'}
                 </td>
-                <td>{p.status ?? '—'}</td>
+                <td>{p.status ?? '-'}</td>
                 <td>{new Date(p.created_at).toLocaleString('fr-FR')}</td>
               </tr>
             ))}

@@ -4,7 +4,7 @@
 
 - Node.js 18+
 - Compte Supabase (projet créé, URL et clés anon/service)
-- (Optionnel) Badiboss Pay pour les paiements réels
+- (Optionnel) passerelle de paiement serveur pour les paiements réels
 
 ## Variables d'environnement
 
@@ -12,7 +12,7 @@
 
 - `EXPO_PUBLIC_SUPABASE_URL` — URL du projet Supabase
 - `EXPO_PUBLIC_SUPABASE_ANON_KEY` — Clé anon Supabase
-- `EXPO_PUBLIC_BADIBOSS_API_BASE` — (optionnel) URL API Badiboss Pay
+- `EXPO_PUBLIC_PAYMENT_API_BASE` — (optionnel) URL API paiement
 
 ### Admin (Vite)
 
@@ -71,9 +71,9 @@ Pour les stores : configurer EAS Build (expo build) et soumettre les binaires.
 - **Admin** : connexion, Packs, Publications, Campagnes, Messages de masse (création + Envoyer), Boosts, Paramètres, Profils, Paiements, Signalements, Conversations.
 - **Utilisateur** : Welcome → Créer un compte → Création profil → Accueil → Profils (modes) → Publications → Annonces → Campagnes → Messages → Signaler un profil → Packs / Paiements → Compte → Déconnexion.
 
-## Paiement réel (Badiboss Pay)
+## Paiement réel
 
 La simulation est en place (packs.tsx, payments.tsx). Pour passer en production :
 
-1. Configurer l’API Badiboss et le webhook (voir `lib/badiboss.ts`).
+1. Configurer l’API paiement et le webhook.
 2. Remplacer les inserts directs dans `payments` et `profile_access` par des appels à l’API puis mise à jour après callback webhook.

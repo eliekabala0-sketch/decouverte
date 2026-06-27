@@ -77,7 +77,7 @@ export interface Payment {
   user_id: string
   /** provider métier (ex. profiles_access, contact_pack, visibility_boost). */
   provider?: string | null
-  /** provider passerelle paiement (ex. Badiboss Pay). */
+  /** provider passerelle paiement interne, non affiche cote utilisateur. */
   payment_provider?: string | null
   payment_method?: string | null
   transaction_ref?: string | null

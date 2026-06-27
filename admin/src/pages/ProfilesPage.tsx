@@ -8,6 +8,7 @@ import './DashboardPage.css'
 export function ProfilesPage() {
   const [profiles, setProfiles] = useState<Profile[]>([])
   const [loading, setLoading] = useState(true)
+  const [message, setMessage] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     const { data } = await supabase.from('profiles').select('*').order('created_at', { ascending: false })
@@ -20,8 +21,21 @@ export function ProfilesPage() {
   }, [load])
 
   const updateStatus = async (id: string, status: 'active' | 'suspended' | 'banned') => {
-    await supabase.from('profiles').update({ status }).eq('id', id)
+    const reason =
+      status === 'active'
+        ? 'Restauration admin'
+        : window.prompt(`Raison de la ${status === 'banned' ? 'bannissement' : 'suspension'} ?`, 'Moderation admin') ?? 'Moderation admin'
+    const { error } = await supabase.rpc('set_profile_moderation_status', {
+      p_profile_id: id,
+      p_status: status,
+      p_reason: reason,
+    })
+    if (error) {
+      setMessage(error.message || 'Action moderation impossible.')
+      return
+    }
     setProfiles((prev) => prev.map((p) => (p.id === id ? { ...p, status } : p)))
+    setMessage('Statut mis a jour et historise.')
   }
 
   if (loading) return <div className="page-loading">Chargement...</div>
@@ -31,6 +45,7 @@ export function ProfilesPage() {
       <PageHeader onRefresh={load} />
       <h1 className="page-title">Profils</h1>
       <p className="page-subtitle">Voir, modifier, suspendre, bannir ou restaurer les profils.</p>
+      {message ? <div className="dashboard-message dashboard-message-success">{message}</div> : null}
       <div className="table-wrap">
         <table className="data-table">
           <thead>
