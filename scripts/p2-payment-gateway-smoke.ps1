@@ -115,7 +115,9 @@ $create = Call-Json 'POST' ($url + '/functions/v1/payment-create') $account.toke
   metadata = @{ contact_quota = 1; photo_quota = 0; smoke = 'p2-payment-gateway' }
 }
 if ($create.status -eq 500 -and $create.raw -match 'non configure') {
-  $results.Add('payment-create: BLOCKED - PAYMENT_API_KEY/PAYMENT_API_SECRET non configures cote Supabase')
+  $results.Add('payment-create pack: BLOCKED - PAYMENT_API_KEY/PAYMENT_API_SECRET non configures cote Supabase')
+} elseif ($create.status -notin @(200, 201)) {
+  $results.Add("payment-create pack: BLOCKED - status $($create.status) $($create.raw)")
 } else {
   Add-Result 'payment-create pack' ($create.status -in @(200, 201) -and $create.body.transaction_id) "status $($create.status)"
   $status = Call-Json 'POST' ($url + '/functions/v1/payment-status') $account.token @{ transaction_id = $create.body.transaction_id }
@@ -146,6 +148,12 @@ $access = Call-Json 'GET' ($url + "/rest/v1/profile_access?select=contact_quota&
 $quota = if (@($access.body).Count -gt 0) { [int]$access.body[0].contact_quota } else { 0 }
 Add-Result 'activation pack apres webhook' ($access.status -eq 200 -and $quota -ge 2) "quota $quota"
 
+$duplicate = Invoke-Webhook @{ event_id = "p2-pay-good-$stamp"; payment_id = $paymentId; status = 'completed' }
+Add-Result 'webhook duplique accepte sans retraitement' ($duplicate.status -eq 200 -and $duplicate.body.duplicate -eq $true) "status $($duplicate.status) $($duplicate.raw)"
+$accessAfterDuplicate = Call-Json 'GET' ($url + "/rest/v1/profile_access?select=contact_quota&user_id=eq.$($account.id)") $account.token $null
+$quotaAfterDuplicate = if (@($accessAfterDuplicate.body).Count -gt 0) { [int]$accessAfterDuplicate.body[0].contact_quota } else { 0 }
+Add-Result 'webhook duplique ne double pas les droits' ($quotaAfterDuplicate -eq $quota) "before $quota after $quotaAfterDuplicate"
+
 $boostPayment = Call-Json 'POST' ($url + '/rest/v1/payments?select=id') $account.token @{
   user_id = $account.id
   amount = 1
@@ -158,6 +166,23 @@ $boostPayment = Call-Json 'POST' ($url + '/rest/v1/payments?select=id') $account
   metadata = @{ days = 3; smoke = 'boost-webhook' }
 }
 Add-Result 'paiement boost pending cree' ($boostPayment.status -in @(200, 201)) "status $($boostPayment.status)"
+
+$boostCreate = Call-Json 'POST' ($url + '/functions/v1/payment-create') $account.token @{
+  payment_type = 'visibility_boost'
+  amount = 1
+  currency = 'USD'
+  customer_phone = $account.phone
+  network = 'OM'
+  metadata = @{ days = 3; smoke = 'p2-payment-gateway-boost' }
+}
+if ($boostCreate.status -eq 500 -and $boostCreate.raw -match 'non configure') {
+  $results.Add('payment-create boost: BLOCKED - PAYMENT_API_KEY/PAYMENT_API_SECRET non configures cote Supabase')
+} elseif ($boostCreate.status -notin @(200, 201)) {
+  $results.Add("payment-create boost: BLOCKED - status $($boostCreate.status) $($boostCreate.raw)")
+} else {
+  Add-Result 'payment-create boost' ($boostCreate.body.transaction_id) "status $($boostCreate.status)"
+}
+
 $boostPaymentId = if ($boostPayment.body -is [array]) { $boostPayment.body[0].id } else { $boostPayment.body.id }
 $boost = Invoke-Webhook @{ event_id = "p2-boost-good-$stamp"; payment_id = $boostPaymentId; status = 'completed' }
 Add-Result 'activation boost webhook accepte' ($boost.status -eq 200 -and $boost.body.status -eq 'completed') "status $($boost.status)"
