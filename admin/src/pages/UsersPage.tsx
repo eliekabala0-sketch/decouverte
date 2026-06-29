@@ -110,11 +110,11 @@ export function UsersPage() {
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
+    const needsClientFilteredPage = !!filters.boost || !!filters.pack
     let query = supabase
       .from('profiles')
       .select('id,phone,username,role,status,gender,city,commune,age,is_verified,mode_libre_active,mode_serieux_active,boost_reason,boosted_until,is_boosted,created_at', { count: 'exact' })
       .order('created_at', { ascending: false })
-      .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1)
 
     if (!filters.includeDeleted) query = query.neq('status', 'deleted')
     if (filters.status) query = query.eq('status', filters.status)
@@ -132,6 +132,9 @@ export function UsersPage() {
     if (filters.date === 'recent') query = query.gte('created_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
     if (filters.date === 'old') query = query.lt('created_at', new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString())
     if (filters.testOnly) query = query.or('username.ilike.%test%,phone.ilike.%test%,phone.ilike.%+24398%,phone.ilike.%+24397%')
+    query = needsClientFilteredPage
+      ? query.range(0, 999)
+      : query.range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1)
 
     const { data, error: loadError, count } = await query
     if (loadError) {
@@ -158,8 +161,13 @@ export function UsersPage() {
     if (filters.pack === 'active') enriched = enriched.filter((u) => u.hasPack)
     if (filters.pack === 'none') enriched = enriched.filter((u) => !u.hasPack)
 
-    setUsers(enriched)
-    setTotal(count ?? enriched.length)
+    if (needsClientFilteredPage) {
+      setUsers(enriched.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE))
+      setTotal(enriched.length)
+    } else {
+      setUsers(enriched)
+      setTotal(count ?? enriched.length)
+    }
     setLoading(false)
   }, [filters, page])
 

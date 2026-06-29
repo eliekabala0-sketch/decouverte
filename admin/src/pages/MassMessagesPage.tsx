@@ -30,6 +30,23 @@ const MESSAGE_CONTENT_TYPES: { value: MassMessageContentType; label: string }[] 
 ]
 
 type Estimate = { recipient_count: number; preview_user_ids: string[] }
+type TargetFilters = ReturnType<typeof normalizeTargetFilters>
+
+function normalizeTargetFilters(filters: {
+  segment: MassMessage['segment']
+  segment_value?: string | null
+  min_age?: number | null
+  max_age?: number | null
+  excluded_statuses?: string[]
+}) {
+  return {
+    segment: filters.segment,
+    segment_value: filters.segment_value || null,
+    min_age: filters.min_age ?? null,
+    max_age: filters.max_age ?? null,
+    excluded_statuses: filters.excluded_statuses ?? ['banned', 'suspended', 'deleted'],
+  }
+}
 
 export function MassMessagesPage() {
   const { user } = useAdminAuth()
@@ -49,12 +66,11 @@ export function MassMessagesPage() {
     max_age: '',
   })
 
-  const targetFilters = useCallback(() => ({
+  const targetFilters = useCallback(() => normalizeTargetFilters({
     segment: form.segment,
     segment_value: form.segment_value || null,
     min_age: form.min_age ? Number(form.min_age) : null,
     max_age: form.max_age ? Number(form.max_age) : null,
-    excluded_statuses: ['banned', 'suspended', 'deleted'],
   }), [form.segment, form.segment_value, form.min_age, form.max_age])
 
   const load = useCallback(async () => {
@@ -63,22 +79,28 @@ export function MassMessagesPage() {
     setLoading(false)
   }, [])
 
-  const previewTarget = useCallback(async () => {
-    setSubmitMessage(null)
-    const { data, error } = await supabase.rpc('estimate_mass_message_recipients', { filters: targetFilters() })
-    if (error) {
-      setEstimate(null)
-      setSubmitMessage({ type: 'error', text: error.message })
-      return null
-    }
+  const estimateTarget = useCallback(async (filters: TargetFilters) => {
+    const { data, error } = await supabase.rpc('estimate_mass_message_recipients', { filters })
+    if (error) throw error
     const row = Array.isArray(data) ? data[0] : data
-    const next = {
+    return {
       recipient_count: Number((row as { recipient_count?: number })?.recipient_count ?? 0),
       preview_user_ids: ((row as { preview_user_ids?: string[] })?.preview_user_ids ?? []) as string[],
     }
-    setEstimate(next)
-    return next
-  }, [targetFilters])
+  }, [])
+
+  const previewTarget = useCallback(async () => {
+    setSubmitMessage(null)
+    try {
+      const next = await estimateTarget(targetFilters())
+      setEstimate(next)
+      return next
+    } catch (error) {
+      setEstimate(null)
+      setSubmitMessage({ type: 'error', text: error instanceof Error ? error.message : 'Estimation impossible.' })
+      return null
+    }
+  }, [estimateTarget, targetFilters])
 
   useEffect(() => {
     void load()
@@ -167,14 +189,21 @@ export function MassMessagesPage() {
   }
 
   const sendNow = async (msg: MassMessage & { id: string }) => {
-    const currentEstimate = await previewTarget()
+    let currentEstimate: Estimate | null = null
+    const messageFilters = normalizeTargetFilters((msg.target_filters ?? targetFilters()) as TargetFilters)
+    try {
+      currentEstimate = await estimateTarget(messageFilters)
+    } catch (error) {
+      setSubmitMessage({ type: 'error', text: error instanceof Error ? error.message : 'Estimation impossible.' })
+      return
+    }
     const sentAt = new Date().toISOString()
     const { error } = await supabase
       .from('mass_messages')
       .update({
         sent_at: sentAt,
         recipient_count: currentEstimate?.recipient_count ?? msg.recipient_count ?? 0,
-        target_filters: msg.target_filters ?? targetFilters(),
+        target_filters: messageFilters,
       })
       .eq('id', msg.id)
     if (error) {
@@ -187,7 +216,7 @@ export function MassMessagesPage() {
       entity_id: msg.id,
       target_user_id: null,
       reason: msg.title,
-      metadata: { filters: msg.target_filters ?? targetFilters(), recipient_count: currentEstimate?.recipient_count ?? msg.recipient_count ?? 0 },
+      metadata: { filters: messageFilters, recipient_count: currentEstimate?.recipient_count ?? msg.recipient_count ?? 0 },
     })
     await load()
     setSubmitMessage({ type: 'success', text: `Message envoye a ${currentEstimate?.recipient_count ?? msg.recipient_count ?? 0} destinataires estimes.` })

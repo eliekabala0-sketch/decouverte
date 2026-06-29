@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Modal,
 } from 'react-native'
 import { useTheme } from '@/theme/ThemeContext'
 import { useAuth } from '@/contexts/AuthContext'
@@ -50,6 +51,7 @@ export default function ProfileDetailScreen() {
   const [photoAccessReady, setPhotoAccessReady] = useState(false)
   const [photoAccessChecking, setPhotoAccessChecking] = useState(false)
   const [photoAccessMessage, setPhotoAccessMessage] = useState<string | null>(null)
+  const [confirmAction, setConfirmAction] = useState<'photo' | 'contact' | null>(null)
 
   const canViewFull = canViewFullProfiles(myProfile?.gender, profileAccess)
 
@@ -176,34 +178,28 @@ export default function ProfileDetailScreen() {
       router.push('/(app)/payments')
       return
     }
-    Alert.alert(
-      'Confirmer le deblocage',
-      `${profileSummary}\n${modeSummary}\nPhotos restantes : ${photosLeft ?? 'selon votre pack'}${outOfLocalCity ? '\n\nAttention : ce profil est hors de votre ville actuelle.' : ''}\n\nVoulez-vous utiliser 1 acces pour decouvrir ce profil ?`,
-      [
-        { text: 'Annuler', style: 'cancel' },
-        {
-          text: 'Confirmer',
-          onPress: async () => {
-            setPhotoAccessChecking(true)
-            try {
-              const res = await unlockProfilePhoto(profile.id, 'global')
-              if (!res.ok) throw new Error(res.message || 'Acces photo non autorise.')
-              setPhotoAccessReady(true)
-              setPhotoAccessMessage(null)
-              await refreshProfile()
-            } catch (e: any) {
-              const message = e?.message ?? 'Acces photo impossible.'
-              setPhotoAccessReady(false)
-              setPhotoAccessMessage(message)
-              if (String(message).toLowerCase().includes('quota')) router.push('/(app)/packs')
-              else Alert.alert('Erreur', message)
-            } finally {
-              setPhotoAccessChecking(false)
-            }
-          },
-        },
-      ],
-    )
+    setConfirmAction('photo')
+  }
+
+  const runUnlockPhoto = async () => {
+    if (!profile?.id) return
+    setConfirmAction(null)
+    setPhotoAccessChecking(true)
+    try {
+      const res = await unlockProfilePhoto(profile.id, 'global')
+      if (!res.ok) throw new Error(res.message || 'Acces photo non autorise.')
+      setPhotoAccessReady(true)
+      setPhotoAccessMessage(null)
+      await refreshProfile()
+    } catch (e: any) {
+      const message = e?.message ?? 'Acces photo impossible.'
+      setPhotoAccessReady(false)
+      setPhotoAccessMessage(message)
+      if (String(message).toLowerCase().includes('quota')) router.push('/(app)/packs')
+      else Alert.alert('Erreur', message)
+    } finally {
+      setPhotoAccessChecking(false)
+    }
   }
 
   const openConversation = async () => {
@@ -250,31 +246,25 @@ export default function ProfileDetailScreen() {
 
   const confirmOpenConversation = () => {
     if (!profile?.id || openingChat) return
-    Alert.alert(
-      'Confirmer le contact',
-      `${profileSummary}\n${modeSummary}\nContacts restants : ${contactsLeft}${outOfLocalCity ? '\n\nAttention : ce profil est hors de votre ville actuelle.' : ''}\n\nVoulez-vous utiliser 1 acces pour decouvrir ce profil ?`,
-      [
-        { text: 'Annuler', style: 'cancel' },
-        {
-          text: 'Confirmer',
-          onPress: async () => {
-            setOpeningChat(true)
-            try {
-              const unlock = await unlockProfileContact(profile.id, 'global')
-              if (!unlock.ok) throw new Error(unlock.message || 'Acces contact non autorise.')
-              setOpeningChat(false)
-              await refreshProfile()
-              await openConversation()
-            } catch (e: any) {
-              setOpeningChat(false)
-              const message = e?.message ?? 'Acces contact impossible.'
-              if (String(message).toLowerCase().includes('quota')) router.push('/(app)/packs')
-              else Alert.alert('Erreur', message)
-            }
-          },
-        },
-      ],
-    )
+    setConfirmAction('contact')
+  }
+
+  const runOpenConversation = async () => {
+    if (!profile?.id) return
+    setConfirmAction(null)
+    setOpeningChat(true)
+    try {
+      const unlock = await unlockProfileContact(profile.id, 'global')
+      if (!unlock.ok) throw new Error(unlock.message || 'Acces contact non autorise.')
+      setOpeningChat(false)
+      await refreshProfile()
+      await openConversation()
+    } catch (e: any) {
+      setOpeningChat(false)
+      const message = e?.message ?? 'Acces contact impossible.'
+      if (String(message).toLowerCase().includes('quota')) router.push('/(app)/packs')
+      else Alert.alert('Erreur', message)
+    }
   }
 
   const reportProfile = async () => {
@@ -337,7 +327,15 @@ export default function ProfileDetailScreen() {
     )
   }
 
+  const confirmTitle = confirmAction === 'contact' ? 'Confirmer le contact' : 'Confirmer le deblocage'
+  const confirmQuota =
+    confirmAction === 'contact'
+      ? `Contacts restants : ${contactsLeft}`
+      : `Photos restantes : ${photosLeft ?? 'selon votre pack'}`
+  const confirmBusy = confirmAction === 'contact' ? openingChat : photoAccessChecking
+
   return (
+    <>
     <ScrollView style={[styles.container, { backgroundColor: colors.background }]} contentContainerStyle={styles.content}>
       <Pressable onPress={() => router.back()} style={styles.back}>
         <Text style={{ color: colors.primary, fontWeight: '600' }}>Retour</Text>
@@ -428,6 +426,44 @@ export default function ProfileDetailScreen() {
         </>
       )}
     </ScrollView>
+    <Modal visible={!!confirmAction} transparent animationType="fade" onRequestClose={() => setConfirmAction(null)}>
+      <View style={styles.modalBackdrop}>
+        <View style={[styles.confirmModal, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <Text style={[styles.confirmTitle, { color: colors.text }]}>{confirmTitle}</Text>
+          <Text style={[styles.confirmText, { color: colors.textSecondary }]}>{profileSummary}</Text>
+          <Text style={[styles.confirmText, { color: colors.textSecondary }]}>{modeSummary}</Text>
+          <Text style={[styles.confirmText, { color: colors.textSecondary }]}>{confirmQuota}</Text>
+          {outOfLocalCity ? (
+            <Text style={[styles.confirmWarning, { color: colors.warning }]}>
+              Attention : ce profil est hors de votre ville actuelle.
+            </Text>
+          ) : null}
+          <Text style={[styles.confirmText, { color: colors.text }]}>
+            Voulez-vous utiliser 1 acces pour decouvrir ce profil ?
+          </Text>
+          <View style={styles.confirmActions}>
+            <Pressable
+              onPress={() => setConfirmAction(null)}
+              disabled={confirmBusy}
+              style={[styles.confirmBtn, { borderColor: colors.border }]}
+            >
+              <Text style={[styles.confirmBtnText, { color: colors.text }]}>Annuler</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                if (confirmAction === 'contact') void runOpenConversation()
+                else void runUnlockPhoto()
+              }}
+              disabled={confirmBusy}
+              style={[styles.confirmBtn, { backgroundColor: colors.primary, borderColor: colors.primary }]}
+            >
+              <Text style={[styles.confirmBtnText, { color: '#FFF' }]}>Confirmer</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
+    </>
   )
 }
 
@@ -473,4 +509,24 @@ const styles = StyleSheet.create({
   reportBtnText: { fontSize: 14 },
   gallery: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   galleryPhoto: { width: 90, height: 90, borderRadius: 8 },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.58)',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  confirmModal: { borderWidth: 1, borderRadius: 16, padding: 20, gap: 10 },
+  confirmTitle: { fontSize: 20, fontWeight: '700', marginBottom: 4 },
+  confirmText: { fontSize: 15, lineHeight: 21 },
+  confirmWarning: { fontSize: 14, fontWeight: '700', lineHeight: 20 },
+  confirmActions: { flexDirection: 'row', gap: 10, marginTop: 8 },
+  confirmBtn: {
+    flex: 1,
+    height: 46,
+    borderRadius: 12,
+    borderWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  confirmBtnText: { fontSize: 15, fontWeight: '700' },
 })
