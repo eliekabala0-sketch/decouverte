@@ -21,6 +21,25 @@ const PROFILE_SELECT =
 const PROFILE_ACCESS_SELECT =
   'user_id,contact_quota,contact_quota_used,updated_at,photo_quota,photo_quota_used,all_profiles_access'
 
+const SESSION_TIMEOUT_MS = 12_000
+const PROFILE_LOAD_TIMEOUT_MS = 15_000
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timeout after ${ms}ms`)), ms)
+    promise.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (error) => {
+        clearTimeout(timer)
+        reject(error)
+      }
+    )
+  })
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
@@ -32,10 +51,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const loadProfilesForUser = useCallback(async (userId: string) => {
     const run = async () => {
-      const [profileResult, accessResult] = await Promise.all([
-        supabase.from('profiles').select(PROFILE_SELECT).eq('id', userId).maybeSingle(),
-        supabase.from('profile_access').select(PROFILE_ACCESS_SELECT).eq('user_id', userId).maybeSingle(),
-      ])
+      const [profileResult, accessResult] = await withTimeout(
+        Promise.all([
+          supabase.from('profiles').select(PROFILE_SELECT).eq('id', userId).maybeSingle(),
+          supabase.from('profile_access').select(PROFILE_ACCESS_SELECT).eq('user_id', userId).maybeSingle(),
+        ]),
+        PROFILE_LOAD_TIMEOUT_MS,
+        'load profile'
+      )
 
       if (expectedUserIdRef.current !== userId) return
 
@@ -74,9 +97,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let mounted = true
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+
+    const applySession = (session: { user: User } | null, source: string) => {
       if (!mounted) return
 
       const uid = session?.user?.id ?? null
@@ -94,11 +116,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         try {
           await loadProfilesForUser(uid)
         } catch (e) {
-          console.warn('[Auth] load profiles after session change', e)
+          console.warn(`[Auth] load profiles ${source}`, e)
+          if (mounted && expectedUserIdRef.current === uid) {
+            setProfile(null)
+            setProfileAccess(null)
+          }
         } finally {
           if (mounted && expectedUserIdRef.current === uid) setLoading(false)
         }
       })()
+    }
+
+    void (async () => {
+      try {
+        const { data, error } = await withTimeout(supabase.auth.getSession(), SESSION_TIMEOUT_MS, 'getSession')
+        if (error) console.warn('[Auth] getSession:', error.message)
+        applySession(data.session, 'bootstrap')
+      } catch (e) {
+        console.warn('[Auth] bootstrap session', e)
+        if (!mounted) return
+        expectedUserIdRef.current = null
+        setUser(null)
+        setProfile(null)
+        setProfileAccess(null)
+        setLoading(false)
+      }
+    })()
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      applySession(session, `session change ${_event}`)
     })
     return () => {
       mounted = false
