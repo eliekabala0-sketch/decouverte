@@ -17,7 +17,10 @@ import {
   PAYMENT_NETWORKS,
   checkServerPayment,
   createServerPayment,
+  normalizeMobileMoneyPhone,
+  paymentFailureMessage,
   paymentStatusLabel,
+  providerFailureCause,
   type PaymentCurrency,
   type PaymentNetwork,
   type PaymentStatus,
@@ -64,6 +67,8 @@ export default function PaymentsScreen() {
   const [boostTierIdx, setBoostTierIdx] = useState(0)
   const [boostPendingId, setBoostPendingId] = useState<string | null>(null)
   const [boostPendingStatus, setBoostPendingStatus] = useState<PaymentStatus>('pending')
+  const [boostPendingMessage, setBoostPendingMessage] = useState<string | null>(null)
+  const [boostPendingCause, setBoostPendingCause] = useState<string | null>(null)
   const [boostBusy, setBoostBusy] = useState(false)
   const [boostTiers, setBoostTiers] = useState<BoostTier[]>([...VISIBILITY_BOOST_TIERS])
   const [network, setNetwork] = useState<PaymentNetwork>('OM')
@@ -144,7 +149,7 @@ export default function PaymentsScreen() {
         payment_type: 'visibility_boost',
         amount: tier.amount,
         currency,
-        customer_phone: customerPhone,
+        customer_phone: normalizeMobileMoneyPhone(customerPhone),
         network,
         metadata: {
           days: tier.days,
@@ -154,12 +159,16 @@ export default function PaymentsScreen() {
       })
       setBoostPendingId(result.transaction_id)
       setBoostPendingStatus(result.status)
+      setBoostPendingMessage(result.status === 'failed' ? paymentFailureMessage(result) : result.message)
+      setBoostPendingCause(providerFailureCause(result))
       Alert.alert(
         'Paiement Mobile Money',
         result.message || `Montant : ${formatAmount(tier.amount, currency)}. Verifiez le paiement apres validation.`
       )
     } catch (e: unknown) {
-      Alert.alert('Boost', e instanceof Error ? e.message : 'Impossible de creer la commande.')
+      setBoostPendingStatus('failed')
+      setBoostPendingMessage(e instanceof Error ? e.message : 'Impossible de creer la commande.')
+      Alert.alert('Paiement non abouti', e instanceof Error ? e.message : 'Impossible de creer la commande.')
     } finally {
       setBoostBusy(false)
     }
@@ -171,12 +180,14 @@ export default function PaymentsScreen() {
     try {
       const result = await checkServerPayment(boostPendingId)
       setBoostPendingStatus(result.status)
+      setBoostPendingMessage(result.status === 'failed' ? paymentFailureMessage(result) : result.message)
+      setBoostPendingCause(providerFailureCause(result))
       if (result.status === 'completed') {
         await refreshProfile()
         setBoostPendingId(null)
         Alert.alert('Paiement reussi', 'Votre mise en avant est activee automatiquement.')
       } else {
-        Alert.alert(paymentStatusLabel(result.status), result.message)
+        Alert.alert(paymentStatusLabel(result.status), result.status === 'failed' ? paymentFailureMessage(result) : result.message)
       }
     } catch (e: unknown) {
       Alert.alert('Boost', e instanceof Error ? e.message : 'Confirmation impossible.')
@@ -232,8 +243,9 @@ export default function PaymentsScreen() {
         {boostPendingId ? (
           <View style={{ gap: 10 }}>
             <Text style={[styles.cardDesc, { color: c.warning }]}>
-              {paymentStatusLabel(boostPendingStatus)}. Verifiez apres validation sur votre telephone.
+              {paymentStatusLabel(boostPendingStatus)}. {boostPendingMessage || 'Verifiez apres validation sur votre telephone.'}
             </Text>
+            {boostPendingCause ? <Text style={[styles.cardDesc, { color: c.warning }]}>{boostPendingCause}</Text> : null}
             <Pressable
               onPress={confirmBoostPayment}
               disabled={boostBusy}
@@ -244,6 +256,12 @@ export default function PaymentsScreen() {
               ) : (
                 <Text style={styles.btnText}>Verifier le paiement</Text>
               )}
+            </Pressable>
+            <Pressable
+              onPress={cancelBoostPayment}
+              style={[styles.btn, { backgroundColor: c.surfaceElevated, borderWidth: 1, borderColor: c.border }]}
+            >
+              <Text style={[styles.btnText, { color: c.text }]}>Annuler et recommencer</Text>
             </Pressable>
           </View>
         ) : (
@@ -263,9 +281,17 @@ export default function PaymentsScreen() {
     )
   }
 
+  const cancelBoostPayment = () => {
+    setBoostPendingId(null)
+    setBoostPendingStatus('canceled')
+    setBoostPendingMessage('Paiement annule. Modifiez le numero, le reseau ou la devise puis relancez.')
+    setBoostPendingCause(null)
+  }
+
   const renderPaymentControls = () => (
     <View style={[styles.paymentBox, { borderColor: c.border }]}>
       <Text style={[styles.paymentTitle, { color: c.text }]}>Paiement Mobile Money</Text>
+      <Text style={[styles.cardDesc, { color: c.textSecondary, marginBottom: 0 }]}>Numero Mobile Money</Text>
       <TextInput
         value={customerPhone}
         onChangeText={setCustomerPhone}

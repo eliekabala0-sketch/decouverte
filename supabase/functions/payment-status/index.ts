@@ -97,16 +97,24 @@ Deno.serve(async (req) => {
       gatewayPayload = { raw: gatewayText }
     }
 
+    const providerMessage = getNestedString(gatewayPayload, ['provider_message', 'message', 'error', 'detail'])
+    const providerStatusCode = getNestedString(gatewayPayload, ['provider_status_code', 'status_code', 'code'])
+
     await recordPaymentEvent(supabase, {
       payment_id: payment.id,
       event_type: gatewayRes.ok ? 'payment.status.checked' : 'payment.status.failed',
       event_id: getNestedString(gatewayPayload, ['event_id', 'id', 'transaction_id']) ?? gatewayTransactionId,
       signature_valid: true,
-      payload: { status: gatewayRes.status, response: gatewayPayload },
+      payload: { status: gatewayRes.status, provider_status_code: providerStatusCode, provider_message: providerMessage, response: gatewayPayload },
     })
 
     if (!gatewayRes.ok) {
-      return json({ status: payment.status ?? 'pending', message: 'Paiement en attente.' }, 200)
+      return json({
+        status: payment.status ?? 'pending',
+        message: 'Paiement en attente.',
+        provider_status_code: providerStatusCode ?? gatewayRes.status,
+        provider_message: providerMessage,
+      }, 200)
     }
 
     const status = normalizePaymentStatus(getNestedString(gatewayPayload, ['status', 'payment_status']))
@@ -115,6 +123,8 @@ Deno.serve(async (req) => {
       gateway_transaction_id: gatewayTransactionId,
       gateway_status: status,
       last_status_check_at: new Date().toISOString(),
+      provider_status_code: providerStatusCode,
+      provider_message: providerMessage,
     }
 
     await supabase.from('payments').update({ status, metadata: nextMetadata }).eq('id', payment.id)
@@ -131,6 +141,8 @@ Deno.serve(async (req) => {
           : status === 'failed'
             ? 'Paiement echoue.'
             : 'Paiement en attente.',
+      provider_status_code: providerStatusCode,
+      provider_message: providerMessage,
     })
   } catch (e) {
     const message = e instanceof Error && e.message.includes('PAYMENT_')

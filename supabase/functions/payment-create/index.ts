@@ -30,6 +30,14 @@ function asMoney(value: unknown): number {
   return Number.isFinite(amount) ? Math.round(amount * 100) / 100 : 0
 }
 
+function normalizeMobileMoneyPhone(value: unknown): string {
+  const digits = String(value ?? '').replace(/\D/g, '')
+  if (digits.startsWith('243')) return digits
+  if (digits.startsWith('0')) return `243${digits.slice(1)}`
+  if (digits.length === 9) return `243${digits}`
+  return digits
+}
+
 function transactionRef(userId: string, type: PaymentType) {
   return `decouverte-${type}-${userId.slice(0, 8)}-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`
 }
@@ -61,8 +69,8 @@ Deno.serve(async (req) => {
     const network = String(body.network ?? '').trim().toUpperCase() as Network
     if (!allowedNetworks.has(network)) return json({ error: 'Reseau Mobile Money invalide.' }, 400)
 
-    const customerPhone = String(body.customer_phone ?? body.phone ?? '').trim()
-    if (customerPhone.replace(/\D/g, '').length < 8) return json({ error: 'Telephone client invalide.' }, 400)
+    const customerPhone = normalizeMobileMoneyPhone(body.customer_phone ?? body.phone)
+    if (customerPhone.length < 11) return json({ error: 'Telephone client invalide.' }, 400)
 
     const metadata = (body.metadata && typeof body.metadata === 'object' ? body.metadata : {}) as Record<string, unknown>
     const userId = authData.user.id
@@ -141,17 +149,25 @@ Deno.serve(async (req) => {
       gatewayPayload = { raw: gatewayText }
     }
 
+    const providerMessage = getNestedString(gatewayPayload, ['provider_message', 'message', 'error', 'detail'])
+    const providerStatusCode = getNestedString(gatewayPayload, ['provider_status_code', 'status_code', 'code'])
+
     await recordPaymentEvent(supabase, {
       payment_id: payment.id,
       event_type: gatewayRes.ok ? 'payment.create.accepted' : 'payment.create.failed',
       event_id: getNestedString(gatewayPayload, ['transaction_id', 'id', 'reference']) ?? reference,
       signature_valid: true,
-      payload: { status: gatewayRes.status, response: gatewayPayload },
+      payload: { status: gatewayRes.status, provider_status_code: providerStatusCode, provider_message: providerMessage, response: gatewayPayload },
     })
 
     if (!gatewayRes.ok) {
       await supabase.from('payments').update({ status: 'failed' }).eq('id', payment.id)
-      return json({ status: 'failed', message: 'Paiement echoue. Reessayez dans quelques instants.' }, 502)
+      return json({
+        status: 'failed',
+        message: 'Paiement non abouti. Verifiez le numero, le reseau ou la devise, puis reessayez.',
+        provider_status_code: providerStatusCode ?? gatewayRes.status,
+        provider_message: providerMessage,
+      }, 502)
     }
 
     const gatewayTransactionId =
@@ -161,6 +177,8 @@ Deno.serve(async (req) => {
       ...((payment.metadata ?? {}) as Record<string, unknown>),
       gateway_transaction_id: gatewayTransactionId,
       gateway_status: status,
+      provider_status_code: providerStatusCode,
+      provider_message: providerMessage,
     }
     await supabase.from('payments').update({ status, metadata: nextMetadata }).eq('id', payment.id)
 
@@ -173,6 +191,8 @@ Deno.serve(async (req) => {
           : status === 'failed'
             ? 'Paiement echoue.'
             : 'Paiement en attente.',
+      provider_status_code: providerStatusCode,
+      provider_message: providerMessage,
     })
   } catch (e) {
     const message = e instanceof Error && e.message.includes('PAYMENT_')

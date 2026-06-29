@@ -5,11 +5,14 @@ $url = [regex]::Match($envText, 'EXPO_PUBLIC_SUPABASE_URL=(.+)').Groups[1].Value
 $anon = [regex]::Match($envText, 'EXPO_PUBLIC_SUPABASE_ANON_KEY=(.+)').Groups[1].Value.Trim()
 $secret = $env:PAYMENT_WEBHOOK_SECRET
 if (-not $secret) { $secret = $env:BADIBOSS_WEBHOOK_SECRET }
-if (-not $secret) { throw 'PAYMENT_WEBHOOK_SECRET or BADIBOSS_WEBHOOK_SECRET is required' }
+$hasWebhookSecret = [bool]$secret
 
 $pass = 'P2PayDc26!'
 $stamp = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
 $results = New-Object System.Collections.Generic.List[string]
+if (-not $hasWebhookSecret) {
+  $results.Add('webhook signed simulation: BLOCKED - PAYMENT_WEBHOOK_SECRET or BADIBOSS_WEBHOOK_SECRET is missing locally; no secret is hardcoded')
+}
 
 function Add-Result($name, $ok, $detail) {
   $status = if ($ok) { 'OK' } else { 'KO' }
@@ -47,6 +50,7 @@ function Call-Json($method, $uri, $token, $bodyObj) {
 }
 
 function Sign-Body($timestamp, $body) {
+  if (-not $script:hasWebhookSecret) { throw 'Webhook secret missing locally' }
   $hmac = [System.Security.Cryptography.HMACSHA256]::new([Text.Encoding]::UTF8.GetBytes($secret))
   -join ($hmac.ComputeHash([Text.Encoding]::UTF8.GetBytes($body)) | ForEach-Object { $_.ToString('x2') })
 }
@@ -138,21 +142,27 @@ $payment = Call-Json 'POST' ($url + '/rest/v1/payments?select=id') $account.toke
 Add-Result 'paiement pending webhook cree' ($payment.status -in @(200, 201)) "status $($payment.status)"
 $paymentId = if ($payment.body -is [array]) { $payment.body[0].id } else { $payment.body.id }
 
-$bad = Invoke-Webhook @{ event_id = "p2-pay-bad-$stamp"; payment_id = $paymentId; status = 'completed' } $true
-Add-Result 'webhook mauvaise signature refusee' ($bad.status -eq 401) "status $($bad.status)"
+if ($hasWebhookSecret) {
+  $bad = Invoke-Webhook @{ event_id = "p2-pay-bad-$stamp"; payment_id = $paymentId; status = 'completed' } $true
+  Add-Result 'webhook mauvaise signature refusee' ($bad.status -eq 401) "status $($bad.status)"
 
-$good = Invoke-Webhook @{ event_id = "p2-pay-good-$stamp"; payment_id = $paymentId; status = 'completed' }
-Add-Result 'webhook signe accepte' ($good.status -eq 200 -and $good.body.status -eq 'completed') "status $($good.status) $($good.raw)"
+  $good = Invoke-Webhook @{ event_id = "p2-pay-good-$stamp"; payment_id = $paymentId; status = 'completed' }
+  Add-Result 'webhook signe accepte' ($good.status -eq 200 -and $good.body.status -eq 'completed') "status $($good.status) $($good.raw)"
 
-$access = Call-Json 'GET' ($url + "/rest/v1/profile_access?select=contact_quota&user_id=eq.$($account.id)") $account.token $null
-$quota = if (@($access.body).Count -gt 0) { [int]$access.body[0].contact_quota } else { 0 }
-Add-Result 'activation pack apres webhook' ($access.status -eq 200 -and $quota -ge 2) "quota $quota"
+  $access = Call-Json 'GET' ($url + "/rest/v1/profile_access?select=contact_quota&user_id=eq.$($account.id)") $account.token $null
+  $quota = if (@($access.body).Count -gt 0) { [int]$access.body[0].contact_quota } else { 0 }
+  Add-Result 'activation pack apres webhook' ($access.status -eq 200 -and $quota -ge 2) "quota $quota"
 
-$duplicate = Invoke-Webhook @{ event_id = "p2-pay-good-$stamp"; payment_id = $paymentId; status = 'completed' }
-Add-Result 'webhook duplique accepte sans retraitement' ($duplicate.status -eq 200 -and $duplicate.body.duplicate -eq $true) "status $($duplicate.status) $($duplicate.raw)"
-$accessAfterDuplicate = Call-Json 'GET' ($url + "/rest/v1/profile_access?select=contact_quota&user_id=eq.$($account.id)") $account.token $null
-$quotaAfterDuplicate = if (@($accessAfterDuplicate.body).Count -gt 0) { [int]$accessAfterDuplicate.body[0].contact_quota } else { 0 }
-Add-Result 'webhook duplique ne double pas les droits' ($quotaAfterDuplicate -eq $quota) "before $quota after $quotaAfterDuplicate"
+  $duplicate = Invoke-Webhook @{ event_id = "p2-pay-good-$stamp"; payment_id = $paymentId; status = 'completed' }
+  Add-Result 'webhook duplique accepte sans retraitement' ($duplicate.status -eq 200 -and $duplicate.body.duplicate -eq $true) "status $($duplicate.status) $($duplicate.raw)"
+  $accessAfterDuplicate = Call-Json 'GET' ($url + "/rest/v1/profile_access?select=contact_quota&user_id=eq.$($account.id)") $account.token $null
+  $quotaAfterDuplicate = if (@($accessAfterDuplicate.body).Count -gt 0) { [int]$accessAfterDuplicate.body[0].contact_quota } else { 0 }
+  Add-Result 'webhook duplique ne double pas les droits' ($quotaAfterDuplicate -eq $quota) "before $quota after $quotaAfterDuplicate"
+} else {
+  $access = Call-Json 'GET' ($url + "/rest/v1/profile_access?select=contact_quota&user_id=eq.$($account.id)") $account.token $null
+  $quota = if (@($access.body).Count -gt 0) { [int]$access.body[0].contact_quota } else { 0 }
+  Add-Result 'pas activation sans completed signe' ($access.status -eq 200 -and $quota -eq 0) "quota $quota"
+}
 
 $boostPayment = Call-Json 'POST' ($url + '/rest/v1/payments?select=id') $account.token @{
   user_id = $account.id
@@ -184,10 +194,16 @@ if ($boostCreate.status -eq 500 -and $boostCreate.raw -match 'non configure') {
 }
 
 $boostPaymentId = if ($boostPayment.body -is [array]) { $boostPayment.body[0].id } else { $boostPayment.body.id }
-$boost = Invoke-Webhook @{ event_id = "p2-boost-good-$stamp"; payment_id = $boostPaymentId; status = 'completed' }
-Add-Result 'activation boost webhook accepte' ($boost.status -eq 200 -and $boost.body.status -eq 'completed') "status $($boost.status)"
-$profileAfter = Call-Json 'GET' ($url + "/rest/v1/profiles?select=is_boosted,boosted_until&id=eq.$($account.id)") $account.token $null
-$boosted = @($profileAfter.body).Count -gt 0 -and $profileAfter.body[0].is_boosted -eq $true
-Add-Result 'boost actif apres webhook' ($profileAfter.status -eq 200 -and $boosted) "status $($profileAfter.status)"
+if ($hasWebhookSecret) {
+  $boost = Invoke-Webhook @{ event_id = "p2-boost-good-$stamp"; payment_id = $boostPaymentId; status = 'completed' }
+  Add-Result 'activation boost webhook accepte' ($boost.status -eq 200 -and $boost.body.status -eq 'completed') "status $($boost.status)"
+  $profileAfter = Call-Json 'GET' ($url + "/rest/v1/profiles?select=is_boosted,boosted_until&id=eq.$($account.id)") $account.token $null
+  $boosted = @($profileAfter.body).Count -gt 0 -and $profileAfter.body[0].is_boosted -eq $true
+  Add-Result 'boost actif apres webhook' ($profileAfter.status -eq 200 -and $boosted) "status $($profileAfter.status)"
+} else {
+  $profileAfter = Call-Json 'GET' ($url + "/rest/v1/profiles?select=is_boosted,boosted_until&id=eq.$($account.id)") $account.token $null
+  $boosted = @($profileAfter.body).Count -gt 0 -and $profileAfter.body[0].is_boosted -eq $true
+  Add-Result 'pas activation boost sans completed signe' ($profileAfter.status -eq 200 -and -not $boosted) "boosted $boosted"
+}
 
 $results | ForEach-Object { Write-Output $_ }

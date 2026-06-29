@@ -29,6 +29,10 @@ function normalizeGender(gender?: string | null) {
   return gender ?? 'other'
 }
 
+function genderLabel(gender?: string | null) {
+  return GENDER_LABELS[normalizeGender(gender)] ?? 'Autre'
+}
+
 export default function ProfileDetailScreen() {
   const router = useRouter()
   const { colors } = useTheme()
@@ -104,22 +108,6 @@ export default function ProfileDetailScreen() {
       return
     }
 
-    const canUseLegacyAccess =
-      user.id === profile.id ||
-      (canViewFull &&
-        !(
-          normalizeGender(myProfile?.gender) === 'F' &&
-          normalizeGender(profile.gender) === 'M' &&
-          !reciprocalEnabled
-        ))
-
-    if (!canUseLegacyAccess) {
-      setPhotoAccessReady(false)
-      setPhotoAccessChecking(false)
-      setPhotoAccessMessage(null)
-      return
-    }
-
     if (user.id === profile.id) {
       setPhotoAccessReady(true)
       setPhotoAccessChecking(false)
@@ -127,28 +115,10 @@ export default function ProfileDetailScreen() {
       return
     }
 
-    let cancelled = false
-    setPhotoAccessChecking(true)
+    setPhotoAccessReady(false)
+    setPhotoAccessChecking(false)
     setPhotoAccessMessage(null)
-    void unlockProfilePhoto(profile.id, 'global')
-      .then((res) => {
-        if (cancelled) return
-        if (res.ok) {
-          setPhotoAccessReady(true)
-          setPhotoAccessMessage(null)
-        } else {
-          setPhotoAccessReady(false)
-          setPhotoAccessMessage(res.message ?? 'Acces photo non autorise.')
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setPhotoAccessChecking(false)
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [user?.id, profile?.id, profile?.gender, myProfile?.gender, canViewFull, reciprocalEnabled])
+  }, [user?.id, profile?.id])
 
   if (!params.id) {
     return (
@@ -182,6 +152,15 @@ export default function ProfileDetailScreen() {
   }
 
   const contactsLeft = remainingContacts(profileAccess)
+  const photosLeft = profileAccess?.photo_quota != null
+    ? Math.max((profileAccess.photo_quota ?? 0) - (profileAccess.photo_quota_used ?? 0), 0)
+    : null
+  const profileSummary = `${genderLabel(profile.gender)} - ${profile.age} ans - ${profile.city}${profile.commune ? ` / ${profile.commune}` : ''}`
+  const modeSummary = [
+    profile.mode_libre_active ? 'Mode Libre' : null,
+    profile.mode_serieux_active ? 'Mode Serieux' : null,
+  ].filter(Boolean).join(', ') || 'Mode non precise'
+  const outOfLocalCity = !!myProfile?.city && !!profile.city && myProfile.city !== profile.city
   const canViewTargetFull =
     canViewFull &&
     photoAccessReady &&
@@ -190,6 +169,42 @@ export default function ProfileDetailScreen() {
       normalizeGender(profile.gender) === 'M' &&
       !reciprocalEnabled
     )
+
+  const confirmUnlockPhoto = () => {
+    if (!profile?.id || photoAccessChecking) return
+    if (!canViewFull) {
+      router.push('/(app)/payments')
+      return
+    }
+    Alert.alert(
+      'Confirmer le deblocage',
+      `${profileSummary}\n${modeSummary}\nPhotos restantes : ${photosLeft ?? 'selon votre pack'}${outOfLocalCity ? '\n\nAttention : ce profil est hors de votre ville actuelle.' : ''}\n\nVoulez-vous utiliser 1 acces pour decouvrir ce profil ?`,
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Confirmer',
+          onPress: async () => {
+            setPhotoAccessChecking(true)
+            try {
+              const res = await unlockProfilePhoto(profile.id, 'global')
+              if (!res.ok) throw new Error(res.message || 'Acces photo non autorise.')
+              setPhotoAccessReady(true)
+              setPhotoAccessMessage(null)
+              await refreshProfile()
+            } catch (e: any) {
+              const message = e?.message ?? 'Acces photo impossible.'
+              setPhotoAccessReady(false)
+              setPhotoAccessMessage(message)
+              if (String(message).toLowerCase().includes('quota')) router.push('/(app)/packs')
+              else Alert.alert('Erreur', message)
+            } finally {
+              setPhotoAccessChecking(false)
+            }
+          },
+        },
+      ],
+    )
+  }
 
   const openConversation = async () => {
     if (!user?.id || !profile) return
@@ -209,10 +224,6 @@ export default function ProfileDetailScreen() {
         }
       }
       if (!convId) {
-        const unlock = await unlockProfileContact(profile.id, 'global')
-        if (!unlock.ok) {
-          throw new Error(unlock.message || 'Acces contact non autorise.')
-        }
         const { data: newConv, error: createErr } = await supabase
           .from('conversations')
           .insert({
@@ -235,6 +246,35 @@ export default function ProfileDetailScreen() {
     } finally {
       setOpeningChat(false)
     }
+  }
+
+  const confirmOpenConversation = () => {
+    if (!profile?.id || openingChat) return
+    Alert.alert(
+      'Confirmer le contact',
+      `${profileSummary}\n${modeSummary}\nContacts restants : ${contactsLeft}${outOfLocalCity ? '\n\nAttention : ce profil est hors de votre ville actuelle.' : ''}\n\nVoulez-vous utiliser 1 acces pour decouvrir ce profil ?`,
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Confirmer',
+          onPress: async () => {
+            setOpeningChat(true)
+            try {
+              const unlock = await unlockProfileContact(profile.id, 'global')
+              if (!unlock.ok) throw new Error(unlock.message || 'Acces contact non autorise.')
+              setOpeningChat(false)
+              await refreshProfile()
+              await openConversation()
+            } catch (e: any) {
+              setOpeningChat(false)
+              const message = e?.message ?? 'Acces contact impossible.'
+              if (String(message).toLowerCase().includes('quota')) router.push('/(app)/packs')
+              else Alert.alert('Erreur', message)
+            }
+          },
+        },
+      ],
+    )
   }
 
   const reportProfile = async () => {
@@ -336,7 +376,7 @@ export default function ProfileDetailScreen() {
           ) : null}
           <Text style={[styles.name, { color: colors.text }]}>{profile.username}</Text>
           <Text style={[styles.meta, { color: colors.textSecondary }]}>
-            {profile.age} ans • {GENDER_LABELS[profile.gender]} • {profile.city}, {profile.commune ?? '—'}
+            {genderLabel(profile.gender)} • {profile.age} ans • {profile.city}, {profile.commune ?? '—'}
           </Text>
           {profile.bio ? (
             <Text style={[styles.bio, { color: colors.text }]}>{profile.bio}</Text>
@@ -357,7 +397,7 @@ export default function ProfileDetailScreen() {
               {contactsLeft > 0 ? `Contacts restants : ${contactsLeft}` : 'Quota atteint : achat requis'}
             </Text>
             <Pressable
-              onPress={openConversation}
+              onPress={confirmOpenConversation}
               disabled={openingChat}
               style={[styles.ctaBtn, { backgroundColor: colors.primary, marginTop: 12 }]}
             >
@@ -374,13 +414,13 @@ export default function ProfileDetailScreen() {
           </View>
           <Text style={[styles.name, { color: colors.text }]}>Profil</Text>
           <Text style={[styles.meta, { color: colors.textSecondary }]}>
-            {profile.age} ans • {profile.city}, {profile.commune ?? '—'}
+            {genderLabel(profile.gender)} • {profile.age} ans • {profile.city}, {profile.commune ?? '—'}
           </Text>
           <Text style={[styles.lockHint, { color: colors.textMuted }]}>
             {photoAccessMessage ?? "Débloquez l'accès pour voir les photos et le profil complet"}
           </Text>
           <Pressable
-            onPress={() => router.push('/(app)/payments')}
+            onPress={canViewFull ? confirmUnlockPhoto : () => router.push('/(app)/payments')}
             style={[styles.ctaBtn, { backgroundColor: colors.primary }]}
           >
             <Text style={styles.ctaBtnText}>Débloquer l'accès</Text>

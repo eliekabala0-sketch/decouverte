@@ -58,3 +58,37 @@ input:focus, select:focus, textarea:focus {
 table { width: 100%; border-collapse: collapse; }
 th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid var(--border); }
 th { color: var(--text-secondary); font-weight: 600; font-size: 0.9rem; }
+.inline-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+.inline-check input { width: auto; }
+.badge {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: var(--surface-elevated);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+.badge-active { border-color: rgba(16,185,129,0.45); color: var(--success); }
+.badge-suspended { border-color: rgba(245,158,11,0.45); color: var(--warning); }
+.badge-banned, .badge-deleted { border-color: rgba(239,68,68,0.45); color: var(--error); }
+.actions-cell { display: flex; flex-wrap: wrap; gap: 6px; min-width: 280px; }
+button.danger {
+  background: rgba(239,68,68,0.14);
+  color: #FCA5A5;
+  border: 1px solid rgba(239,68,68,0.35);
+}
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 16px;
+}

@@ -10,6 +10,13 @@ type ProfileCardProps = {
   onPress?: () => void
 }
 
+function genderLabel(gender?: string | null) {
+  const value = String(gender ?? '').trim().toLowerCase()
+  if (['f', 'female', 'woman', 'femme'].includes(value)) return 'Femme'
+  if (['m', 'male', 'man', 'homme', 'h'].includes(value)) return 'Homme'
+  return 'Autre'
+}
+
 export function ProfileCard({ profile, canViewFull = true }: ProfileCardProps) {
   const theme = useTheme()
   const showFull = canViewFull
@@ -36,7 +43,7 @@ export function ProfileCard({ profile, canViewFull = true }: ProfileCardProps) {
         {showFull ? profile.username : 'Profil'}
       </Text>
       <Text style={[styles.meta, { color: theme.colors.textSecondary }]}>
-        {profile.age} ans • {profile.city} • {profile.commune ?? '—'}
+        {genderLabel(profile.gender)} • {profile.age} ans • {profile.city} • {profile.commune ?? '—'}
       </Text>
       {showFull && profile.bio ? (
         <Text style={[styles.bio, { color: theme.colors.textSecondary }]} numberOfLines={2}>

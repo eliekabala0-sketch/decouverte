@@ -16,11 +16,14 @@ function normalizeGender(gender?: string | null) {
 
 function matchesSegment(
   msg: MassMessage,
-  profile: { gender: string; city: string; commune: string | null } | null,
+  profile: { gender: string; city: string; commune: string | null; age?: number | null; is_verified?: boolean | null; mode_libre_active?: boolean | null; mode_serieux_active?: boolean | null; boosted_until?: string | null; is_boosted?: boolean | null } | null,
   profileAccess: ProfileAccess | null,
 ): boolean {
   if (!profile) return msg.segment === 'all'
   const gender = normalizeGender(profile.gender)
+  const filters = (msg.target_filters ?? {}) as { min_age?: number; max_age?: number }
+  if (filters.min_age && (profile.age ?? 0) < filters.min_age) return false
+  if (filters.max_age && (profile.age ?? 0) > filters.max_age) return false
   if (msg.segment === 'all') return true
   if (msg.segment === 'men' && gender === 'M') return true
   if (msg.segment === 'women' && gender === 'F') return true
@@ -34,7 +37,14 @@ function matchesSegment(
   }
   if (msg.segment === 'city' && msg.segment_value) return profile.city === msg.segment_value
   if (msg.segment === 'commune' && msg.segment_value) return (profile.commune ?? '') === msg.segment_value
-  if (msg.segment === 'mode_libre' || msg.segment === 'mode_serieux') return true
+  if (msg.segment === 'mode_libre') return !!profile.mode_libre_active
+  if (msg.segment === 'mode_serieux') return !!profile.mode_serieux_active
+  if (msg.segment === 'verified') return !!profile.is_verified
+  if (msg.segment === 'unverified') return !profile.is_verified
+  if (msg.segment === 'boosted') return !!profile.is_boosted || (!!profile.boosted_until && new Date(profile.boosted_until) > new Date())
+  if (msg.segment === 'with_pack') return canViewFullProfiles(gender, profileAccess) || remainingContacts(profileAccess) > 0
+  if (msg.segment === 'without_pack') return !(canViewFullProfiles(gender, profileAccess) || remainingContacts(profileAccess) > 0)
+  if (msg.segment === 'new_users') return true
   return false
 }
 

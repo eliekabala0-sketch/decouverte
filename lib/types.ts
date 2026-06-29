@@ -6,7 +6,7 @@
 export type Gender = 'M' | 'F' | 'other'
 export type AppMode = 'libre' | 'serieux'
 export type SerieuxIntention = 'amitie' | 'copinage' | 'amour' | 'mariage'
-export type ProfileStatus = 'active' | 'suspended' | 'banned'
+export type ProfileStatus = 'active' | 'suspended' | 'banned' | 'deleted'
 export type ReportStatus = 'pending' | 'reviewed' | 'resolved' | 'dismissed'
 
 export type PaymentProvider = 'badiboss_pay' | 'other'
@@ -166,8 +166,11 @@ export interface MassMessage {
   content_type?: MassMessageContentType
   image_url?: string | null
   video_url?: string | null
-  segment: 'all' | 'men' | 'women' | 'paying' | 'non_paying' | 'city' | 'commune' | 'mode_libre' | 'mode_serieux'
+  segment: 'all' | 'men' | 'women' | 'paying' | 'non_paying' | 'city' | 'commune' | 'mode_libre' | 'mode_serieux' | 'verified' | 'unverified' | 'boosted' | 'with_pack' | 'without_pack' | 'new_users'
   segment_value?: string
+  target_filters?: Record<string, unknown> | null
+  recipient_count?: number | null
+  preview_user_ids?: string[] | null
   sent_at: string | null
   created_by: string
   created_at: string
