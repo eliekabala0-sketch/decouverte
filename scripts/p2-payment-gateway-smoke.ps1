@@ -52,7 +52,7 @@ function Call-Json($method, $uri, $token, $bodyObj) {
 function Sign-Body($timestamp, $body) {
   if (-not $script:hasWebhookSecret) { throw 'Webhook secret missing locally' }
   $hmac = [System.Security.Cryptography.HMACSHA256]::new([Text.Encoding]::UTF8.GetBytes($secret))
-  -join ($hmac.ComputeHash([Text.Encoding]::UTF8.GetBytes($body)) | ForEach-Object { $_.ToString('x2') })
+  -join ($hmac.ComputeHash([Text.Encoding]::UTF8.GetBytes("$timestamp.$body")) | ForEach-Object { $_.ToString('x2') })
 }
 
 function Invoke-Webhook($obj, $badSignature = $false) {
@@ -147,17 +147,24 @@ if ($hasWebhookSecret) {
   Add-Result 'webhook mauvaise signature refusee' ($bad.status -eq 401) "status $($bad.status)"
 
   $good = Invoke-Webhook @{ event_id = "p2-pay-good-$stamp"; payment_id = $paymentId; status = 'completed' }
-  Add-Result 'webhook signe accepte' ($good.status -eq 200 -and $good.body.status -eq 'completed') "status $($good.status) $($good.raw)"
+  if ($good.status -eq 401) {
+    $results.Add("webhook signe accepte: BLOCKED - WEBHOOK_SECRET local manquant ou different (status 401 $($good.raw))")
+    $access = Call-Json 'GET' ($url + "/rest/v1/profile_access?select=contact_quota&user_id=eq.$($account.id)") $account.token $null
+    $quota = if (@($access.body).Count -gt 0) { [int]$access.body[0].contact_quota } else { 0 }
+    Add-Result 'pas activation pack avec secret local different' ($access.status -eq 200 -and $quota -eq 0) "quota $quota"
+  } else {
+    Add-Result 'webhook signe accepte' ($good.status -eq 200 -and $good.body.status -eq 'completed') "status $($good.status) $($good.raw)"
 
-  $access = Call-Json 'GET' ($url + "/rest/v1/profile_access?select=contact_quota&user_id=eq.$($account.id)") $account.token $null
-  $quota = if (@($access.body).Count -gt 0) { [int]$access.body[0].contact_quota } else { 0 }
-  Add-Result 'activation pack apres webhook' ($access.status -eq 200 -and $quota -ge 2) "quota $quota"
+    $access = Call-Json 'GET' ($url + "/rest/v1/profile_access?select=contact_quota&user_id=eq.$($account.id)") $account.token $null
+    $quota = if (@($access.body).Count -gt 0) { [int]$access.body[0].contact_quota } else { 0 }
+    Add-Result 'activation pack apres webhook' ($access.status -eq 200 -and $quota -ge 2) "quota $quota"
 
-  $duplicate = Invoke-Webhook @{ event_id = "p2-pay-good-$stamp"; payment_id = $paymentId; status = 'completed' }
-  Add-Result 'webhook duplique accepte sans retraitement' ($duplicate.status -eq 200 -and $duplicate.body.duplicate -eq $true) "status $($duplicate.status) $($duplicate.raw)"
-  $accessAfterDuplicate = Call-Json 'GET' ($url + "/rest/v1/profile_access?select=contact_quota&user_id=eq.$($account.id)") $account.token $null
-  $quotaAfterDuplicate = if (@($accessAfterDuplicate.body).Count -gt 0) { [int]$accessAfterDuplicate.body[0].contact_quota } else { 0 }
-  Add-Result 'webhook duplique ne double pas les droits' ($quotaAfterDuplicate -eq $quota) "before $quota after $quotaAfterDuplicate"
+    $duplicate = Invoke-Webhook @{ event_id = "p2-pay-good-$stamp"; payment_id = $paymentId; status = 'completed' }
+    Add-Result 'webhook duplique accepte sans retraitement' ($duplicate.status -eq 200 -and $duplicate.body.duplicate -eq $true) "status $($duplicate.status) $($duplicate.raw)"
+    $accessAfterDuplicate = Call-Json 'GET' ($url + "/rest/v1/profile_access?select=contact_quota&user_id=eq.$($account.id)") $account.token $null
+    $quotaAfterDuplicate = if (@($accessAfterDuplicate.body).Count -gt 0) { [int]$accessAfterDuplicate.body[0].contact_quota } else { 0 }
+    Add-Result 'webhook duplique ne double pas les droits' ($quotaAfterDuplicate -eq $quota) "before $quota after $quotaAfterDuplicate"
+  }
 } else {
   $access = Call-Json 'GET' ($url + "/rest/v1/profile_access?select=contact_quota&user_id=eq.$($account.id)") $account.token $null
   $quota = if (@($access.body).Count -gt 0) { [int]$access.body[0].contact_quota } else { 0 }
@@ -196,10 +203,15 @@ if ($boostCreate.status -eq 500 -and $boostCreate.raw -match 'non configure') {
 $boostPaymentId = if ($boostPayment.body -is [array]) { $boostPayment.body[0].id } else { $boostPayment.body.id }
 if ($hasWebhookSecret) {
   $boost = Invoke-Webhook @{ event_id = "p2-boost-good-$stamp"; payment_id = $boostPaymentId; status = 'completed' }
-  Add-Result 'activation boost webhook accepte' ($boost.status -eq 200 -and $boost.body.status -eq 'completed') "status $($boost.status)"
   $profileAfter = Call-Json 'GET' ($url + "/rest/v1/profiles?select=is_boosted,boosted_until&id=eq.$($account.id)") $account.token $null
   $boosted = @($profileAfter.body).Count -gt 0 -and $profileAfter.body[0].is_boosted -eq $true
-  Add-Result 'boost actif apres webhook' ($profileAfter.status -eq 200 -and $boosted) "status $($profileAfter.status)"
+  if ($boost.status -eq 401) {
+    $results.Add("activation boost webhook accepte: BLOCKED - WEBHOOK_SECRET local manquant ou different (status 401 $($boost.raw))")
+    Add-Result 'pas activation boost avec secret local different' ($profileAfter.status -eq 200 -and -not $boosted) "boosted $boosted"
+  } else {
+    Add-Result 'activation boost webhook accepte' ($boost.status -eq 200 -and $boost.body.status -eq 'completed') "status $($boost.status)"
+    Add-Result 'boost actif apres webhook' ($profileAfter.status -eq 200 -and $boosted) "status $($profileAfter.status)"
+  }
 } else {
   $profileAfter = Call-Json 'GET' ($url + "/rest/v1/profiles?select=is_boosted,boosted_until&id=eq.$($account.id)") $account.token $null
   $boosted = @($profileAfter.body).Count -gt 0 -and $profileAfter.body[0].is_boosted -eq $true
