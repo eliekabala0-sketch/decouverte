@@ -21,7 +21,7 @@ const PROFILE_SELECT =
 const PROFILE_ACCESS_SELECT =
   'user_id,contact_quota,contact_quota_used,updated_at,photo_quota,photo_quota_used,all_profiles_access'
 
-const SESSION_TIMEOUT_MS = 12_000
+const SESSION_TIMEOUT_MS = 20_000
 const PROFILE_LOAD_TIMEOUT_MS = 15_000
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
