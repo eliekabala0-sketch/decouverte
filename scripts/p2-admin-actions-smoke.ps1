@@ -45,6 +45,9 @@ function Call-Json($method, $uri, $token, $bodyObj) {
 $adminLogin = Call-Json 'POST' ($url + '/auth/v1/token?grant_type=password') $anon @{ email = 'tel_243900000199@gmail.com'; password = 'TestDc26' }
 Add-Result 'login admin test' $adminLogin.ok "status $($adminLogin.status)"
 $adminToken = $adminLogin.body.access_token
+$adminId = $adminLogin.body.user.id
+$adminProfile = Call-Json 'GET' ($url + "/rest/v1/profiles?select=role&id=eq.$adminId") $adminToken $null
+$adminRole = if (@($adminProfile.body).Count -gt 0) { $adminProfile.body[0].role } else { $null }
 
 $signup = Call-Json 'POST' ($url + '/auth/v1/signup') $anon @{ email = "tel_p2_admin_action_$stamp@gmail.com"; password = $pass; data = @{ phone = "+243980$stamp" } }
 Add-Result 'register compte test admin action' ($signup.status -in @(200, 201)) "status $($signup.status)"
@@ -77,5 +80,19 @@ foreach ($status in @('suspended', 'active', 'banned', 'active')) {
 
 $audit = Call-Json 'GET' ($url + "/rest/v1/audit_events?select=action,target_user_id,reason&target_user_id=eq.$testId&action=eq.admin_set_profile_status&limit=10") $adminToken $null
 Add-Result 'audit admin actions lisible' ($audit.ok -and @($audit.body).Count -ge 4) "count $(@($audit.body).Count)"
+
+if ($adminRole -in @('super_admin', 'superadmin')) {
+  $delete = Call-Json 'POST' ($url + '/rest/v1/rpc/admin_soft_delete_user') $adminToken @{ p_profile_id = $testId; p_confirmation = 'SUPPRIMER'; p_reason = 'p2 admin actions smoke soft delete test account' }
+  Add-Result 'admin_soft_delete_user compte test' $delete.ok "status $($delete.status) $($delete.raw)"
+
+  $deletedProfile = Call-Json 'GET' ($url + "/rest/v1/profiles?select=status&id=eq.$testId") $adminToken $null
+  $deletedStatus = if (@($deletedProfile.body).Count -gt 0) { $deletedProfile.body[0].status } else { $null }
+  Add-Result 'compte test archive masque' ($deletedProfile.ok -and $deletedStatus -eq 'deleted') "status $deletedStatus"
+
+  $deleteAudit = Call-Json 'GET' ($url + "/rest/v1/audit_events?select=action,target_user_id,reason&target_user_id=eq.$testId&action=eq.admin_soft_delete_user&limit=10") $adminToken $null
+  Add-Result 'audit suppression compte test lisible' ($deleteAudit.ok -and @($deleteAudit.body).Count -ge 1) "count $(@($deleteAudit.body).Count)"
+} else {
+  $results.Add("admin_soft_delete_user compte test: BLOCKED - compte smoke role '$adminRole', super_admin requis")
+}
 
 $results | ForEach-Object { Write-Output $_ }

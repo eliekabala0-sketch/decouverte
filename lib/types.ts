@@ -42,6 +42,14 @@ export interface Profile {
   is_boosted?: boolean | null
   country: string | null
   role: string | null
+  ip_country?: string | null
+  ip_region?: string | null
+  ip_city?: string | null
+  ip_hash?: string | null
+  ip_source?: string | null
+  ip_confidence?: number | null
+  ip_last_seen_at?: string | null
+  ip_city_mismatch?: boolean | null
   can_view_full?: boolean
   is_limited_teaser?: boolean
   active_boost?: boolean

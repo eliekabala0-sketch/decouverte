@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { View, Text, StyleSheet, FlatList, Pressable, ActivityIndicator, TextInput, ScrollView } from 'react-native'
 import { useTheme } from '@/theme/ThemeContext'
@@ -10,12 +10,36 @@ import { getProfileFeed, type FeedMode } from '../../lib/profileFeedRpc'
 import { useAppFeatureFlags } from '@/lib/useAppFeatureFlags'
 
 const PAGE_SIZE = 20
+type TargetGender = 'all' | 'M' | 'F'
+type ProfileFilters = {
+  city: string
+  commune: string
+  targetGender: TargetGender
+  minAge: string
+  maxAge: string
+  verifiedOnly: boolean
+  withPhotoOnly: boolean
+  expandScope: boolean
+}
 
 function normalizeGender(gender?: string | null) {
   const value = String(gender ?? '').trim().toLowerCase()
   if (['m', 'male', 'man', 'homme', 'h'].includes(value)) return 'M'
   if (['f', 'female', 'woman', 'femme'].includes(value)) return 'F'
   return gender ?? 'other'
+}
+
+function oppositeGender(gender?: string | null): TargetGender {
+  const normalized = normalizeGender(gender)
+  if (normalized === 'M') return 'F'
+  if (normalized === 'F') return 'M'
+  return 'all'
+}
+
+function genderFilterLabel(value: TargetGender) {
+  if (value === 'F') return 'Femmes'
+  if (value === 'M') return 'Hommes'
+  return 'Tous'
 }
 
 export default function ProfilesScreen() {
@@ -33,18 +57,30 @@ export default function ProfilesScreen() {
   const [totalCount, setTotalCount] = useState(0)
   const [hasMore, setHasMore] = useState(false)
   const [fallbackMode, setFallbackMode] = useState(false)
-  const [city, setCity] = useState(myProfile?.city ?? '')
-  const [commune, setCommune] = useState('')
-  const [targetGender, setTargetGender] = useState<'all' | 'M' | 'F'>('all')
-  const [minAge, setMinAge] = useState('')
-  const [maxAge, setMaxAge] = useState('')
-  const [verifiedOnly, setVerifiedOnly] = useState(false)
-  const [withPhotoOnly, setWithPhotoOnly] = useState(false)
-  const [expandScope, setExpandScope] = useState(false)
+  const defaultFilters = useMemo<ProfileFilters>(() => ({
+    city: myProfile?.city ?? '',
+    commune: '',
+    targetGender: oppositeGender(myProfile?.gender),
+    minAge: '',
+    maxAge: '',
+    verifiedOnly: false,
+    withPhotoOnly: false,
+    expandScope: false,
+  }), [myProfile?.city, myProfile?.gender])
+  const [appliedFilters, setAppliedFilters] = useState<ProfileFilters>(defaultFilters)
+  const [draftFilters, setDraftFilters] = useState<ProfileFilters>(defaultFilters)
+  const [filtersOpen, setFiltersOpen] = useState(false)
 
   useEffect(() => {
-    if (myProfile?.city && !city) setCity(myProfile.city)
-  }, [myProfile?.city, city])
+    setAppliedFilters((prev) => {
+      const untouched = !prev.city && !prev.commune && prev.targetGender === 'all' && !prev.expandScope
+      return untouched ? defaultFilters : prev
+    })
+    setDraftFilters((prev) => {
+      const untouched = !prev.city && !prev.commune && prev.targetGender === 'all' && !prev.expandScope
+      return untouched ? defaultFilters : prev
+    })
+  }, [defaultFilters])
 
   const feedMode: FeedMode = mode === 'serieux' ? 'serieux' : 'libre'
   const modeLabel = feedMode === 'serieux' ? MODES.serieux.label : MODES.libre.label
@@ -82,7 +118,7 @@ export default function ProfilesScreen() {
         setLoadingMore(false)
       }
     },
-    [feedMode, city, commune, targetGender, minAge, maxAge, verifiedOnly, withPhotoOnly, expandScope],
+    [feedMode, appliedFilters],
   )
 
   useEffect(() => {
@@ -98,6 +134,38 @@ export default function ProfilesScreen() {
   }
 
   const onPressProfile = (id: string) => router.push(`/(app)/profile/${id}`)
+  const { city, commune, targetGender, minAge, maxAge, verifiedOnly, withPhotoOnly, expandScope } = appliedFilters
+  const updateDraft = <K extends keyof ProfileFilters>(key: K, value: ProfileFilters[K]) => {
+    setDraftFilters((prev) => ({ ...prev, [key]: value }))
+  }
+  const applyFilters = () => {
+    setAppliedFilters(draftFilters)
+    setFiltersOpen(false)
+    setRefreshKey((k) => k + 1)
+  }
+  const resetFilters = () => {
+    setDraftFilters(defaultFilters)
+    setAppliedFilters(defaultFilters)
+    setFiltersOpen(false)
+    setRefreshKey((k) => k + 1)
+  }
+  const expandToCountry = () => {
+    const next = { ...appliedFilters, expandScope: true, city: '', commune: '' }
+    setDraftFilters(next)
+    setAppliedFilters(next)
+    setFiltersOpen(false)
+    setRefreshKey((k) => k + 1)
+  }
+  const activeChips = [
+    appliedFilters.expandScope ? 'Toute la RDC' : (appliedFilters.city || 'Ville non definie'),
+    genderFilterLabel(appliedFilters.targetGender),
+    modeLabel,
+    appliedFilters.commune,
+    appliedFilters.minAge ? `Age min ${appliedFilters.minAge}` : '',
+    appliedFilters.maxAge ? `Age max ${appliedFilters.maxAge}` : '',
+    appliedFilters.verifiedOnly ? 'Verifies' : '',
+    appliedFilters.withPhotoOnly ? 'Avec photo' : '',
+  ].filter(Boolean)
 
   if (loading && profiles.length === 0) {
     return (
@@ -124,89 +192,104 @@ export default function ProfilesScreen() {
       <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
         {totalCount || profiles.length} profil{(totalCount || profiles.length) !== 1 ? 's' : ''}
       </Text>
-      <View style={[styles.filters, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterChips}>
-          {CITIES_RDC.map((item) => (
-            <Pressable
-              key={item}
-              onPress={() => {
-                setCity(item === 'Autre' ? '' : item)
-                setCommune('')
-                setExpandScope(false)
-              }}
-              style={[styles.chip, { borderColor: city === item ? colors.primary : colors.border, backgroundColor: city === item ? colors.primarySoft : colors.surfaceElevated }]}
-            >
-              <Text style={[styles.chipText, { color: colors.text }]}>{item}</Text>
-            </Pressable>
+      <View style={[styles.filterSummary, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <View style={styles.summaryTop}>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.summaryTitle, { color: colors.text }]}>
+              {appliedFilters.expandScope ? 'Toute la RDC' : (appliedFilters.city || 'Ville non definie')}
+            </Text>
+            <Text style={[styles.summaryText, { color: colors.textSecondary }]}>
+              {genderFilterLabel(appliedFilters.targetGender)} · {modeLabel}
+            </Text>
+          </View>
+          <Pressable onPress={() => setFiltersOpen((v) => !v)} style={[styles.filterButton, { backgroundColor: colors.primary }]}>
+            <Text style={styles.filterButtonText}>{filtersOpen ? 'Fermer' : 'Filtres'}</Text>
+          </Pressable>
+        </View>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.activeChips}>
+          {activeChips.map((chip) => (
+            <View key={chip} style={[styles.activeChip, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+              <Text style={[styles.activeChipText, { color: colors.text }]}>{chip}</Text>
+            </View>
           ))}
+          <Pressable onPress={() => setFiltersOpen(true)} style={[styles.activeChip, { borderColor: colors.primary }]}>
+            <Text style={[styles.activeChipText, { color: colors.primary }]}>Modifier</Text>
+          </Pressable>
         </ScrollView>
-        {city === 'Kinshasa' ? (
+      </View>
+      {filtersOpen ? (
+        <View style={[styles.filters, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterChips}>
-            {['Toutes communes', ...COMMUNES_KINSHASA].map((item) => (
+            {CITIES_RDC.map((item) => (
               <Pressable
                 key={item}
-                onPress={() => setCommune(item === 'Toutes communes' ? '' : item)}
-                style={[styles.chip, { borderColor: (commune || 'Toutes communes') === item ? colors.primary : colors.border }]}
+                onPress={() => {
+                  updateDraft('city', item === 'Autre' ? '' : item)
+                  updateDraft('commune', '')
+                  updateDraft('expandScope', false)
+                }}
+                style={[styles.chip, { borderColor: draftFilters.city === item ? colors.primary : colors.border, backgroundColor: draftFilters.city === item ? colors.primarySoft : colors.surfaceElevated }]}
               >
                 <Text style={[styles.chipText, { color: colors.text }]}>{item}</Text>
               </Pressable>
             ))}
           </ScrollView>
-        ) : (
-          <TextInput
-            value={commune}
-            onChangeText={setCommune}
-            placeholder="Commune"
-            placeholderTextColor={colors.textMuted}
-            style={[styles.input, { borderColor: colors.border, color: colors.text }]}
-          />
-        )}
-        <View style={styles.filterRow}>
-          {[
-            { value: 'all', label: 'Tous' },
-            { value: 'F', label: 'Femmes' },
-            { value: 'M', label: 'Hommes' },
-          ].map((item) => (
-            <Pressable
-              key={item.value}
-              onPress={() => setTargetGender(item.value as 'all' | 'M' | 'F')}
-              style={[styles.chip, { borderColor: targetGender === item.value ? colors.primary : colors.border }]}
-            >
-              <Text style={[styles.chipText, { color: colors.text }]}>{item.label}</Text>
+          {draftFilters.city === 'Kinshasa' ? (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterChips}>
+              {['Toutes communes', ...COMMUNES_KINSHASA].map((item) => (
+                <Pressable
+                  key={item}
+                  onPress={() => updateDraft('commune', item === 'Toutes communes' ? '' : item)}
+                  style={[styles.chip, { borderColor: (draftFilters.commune || 'Toutes communes') === item ? colors.primary : colors.border }]}
+                >
+                  <Text style={[styles.chipText, { color: colors.text }]}>{item}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          ) : (
+            <TextInput
+              value={draftFilters.commune}
+              onChangeText={(value) => updateDraft('commune', value)}
+              placeholder="Commune"
+              placeholderTextColor={colors.textMuted}
+              style={[styles.input, { borderColor: colors.border, color: colors.text }]}
+            />
+          )}
+          <View style={styles.filterRow}>
+            {[
+              { value: 'all', label: 'Tous' },
+              { value: 'F', label: 'Femmes' },
+              { value: 'M', label: 'Hommes' },
+            ].map((item) => (
+              <Pressable
+                key={item.value}
+                onPress={() => updateDraft('targetGender', item.value as TargetGender)}
+                style={[styles.chip, { borderColor: draftFilters.targetGender === item.value ? colors.primary : colors.border }]}
+              >
+                <Text style={[styles.chipText, { color: colors.text }]}>{item.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <View style={styles.filterRow}>
+            <TextInput value={draftFilters.minAge} onChangeText={(value) => updateDraft('minAge', value)} keyboardType="number-pad" placeholder="Age min" placeholderTextColor={colors.textMuted} style={[styles.smallInput, { borderColor: colors.border, color: colors.text }]} />
+            <TextInput value={draftFilters.maxAge} onChangeText={(value) => updateDraft('maxAge', value)} keyboardType="number-pad" placeholder="Age max" placeholderTextColor={colors.textMuted} style={[styles.smallInput, { borderColor: colors.border, color: colors.text }]} />
+            <Pressable onPress={() => updateDraft('verifiedOnly', !draftFilters.verifiedOnly)} style={[styles.chip, { borderColor: draftFilters.verifiedOnly ? colors.primary : colors.border }]}>
+              <Text style={[styles.chipText, { color: colors.text }]}>Verifies</Text>
             </Pressable>
-          ))}
+            <Pressable onPress={() => updateDraft('withPhotoOnly', !draftFilters.withPhotoOnly)} style={[styles.chip, { borderColor: draftFilters.withPhotoOnly ? colors.primary : colors.border }]}>
+              <Text style={[styles.chipText, { color: colors.text }]}>Avec photo</Text>
+            </Pressable>
+          </View>
+          <View style={styles.filterRow}>
+            <Pressable onPress={applyFilters} style={[styles.retryBtn, { backgroundColor: colors.primary }]}>
+              <Text style={styles.retryText}>Appliquer</Text>
+            </Pressable>
+            <Pressable onPress={resetFilters} style={[styles.resetBtn, { borderColor: colors.border }]}>
+              <Text style={[styles.chipText, { color: colors.text }]}>Reinitialiser</Text>
+            </Pressable>
+          </View>
         </View>
-        <View style={styles.filterRow}>
-          <TextInput value={minAge} onChangeText={setMinAge} keyboardType="number-pad" placeholder="Age min" placeholderTextColor={colors.textMuted} style={[styles.smallInput, { borderColor: colors.border, color: colors.text }]} />
-          <TextInput value={maxAge} onChangeText={setMaxAge} keyboardType="number-pad" placeholder="Age max" placeholderTextColor={colors.textMuted} style={[styles.smallInput, { borderColor: colors.border, color: colors.text }]} />
-          <Pressable onPress={() => setVerifiedOnly((v) => !v)} style={[styles.chip, { borderColor: verifiedOnly ? colors.primary : colors.border }]}>
-            <Text style={[styles.chipText, { color: colors.text }]}>Verifies</Text>
-          </Pressable>
-          <Pressable onPress={() => setWithPhotoOnly((v) => !v)} style={[styles.chip, { borderColor: withPhotoOnly ? colors.primary : colors.border }]}>
-            <Text style={[styles.chipText, { color: colors.text }]}>Avec photo</Text>
-          </Pressable>
-        </View>
-        <View style={styles.filterRow}>
-          <Pressable onPress={() => setRefreshKey((k) => k + 1)} style={[styles.retryBtn, { backgroundColor: colors.primary }]}>
-            <Text style={styles.retryText}>Appliquer</Text>
-          </Pressable>
-          <Pressable
-            onPress={() => {
-              setCity(myProfile?.city ?? '')
-              setCommune('')
-              setTargetGender('all')
-              setMinAge('')
-              setMaxAge('')
-              setVerifiedOnly(false)
-              setWithPhotoOnly(false)
-              setExpandScope(false)
-            }}
-            style={[styles.resetBtn, { borderColor: colors.border }]}
-          >
-            <Text style={[styles.chipText, { color: colors.text }]}>Reinitialiser</Text>
-          </Pressable>
-        </View>
-      </View>
+      ) : null}
       {normalizeGender(myProfile?.gender) === 'F' && !reciprocalEnabled ? (
         <Text style={[styles.subtitle, { color: colors.textMuted }]}>
           La recherche reciproque est desactivee : apercu limite, details complets et echanges controles.
@@ -240,7 +323,7 @@ export default function ProfilesScreen() {
               {city && !expandScope ? 'Aucun profil disponible dans cette ville pour le moment.' : 'Aucun profil pour le moment.'}
             </Text>
             {city && !expandScope ? (
-              <Pressable onPress={() => setExpandScope(true)} style={[styles.retryBtn, { backgroundColor: colors.primary }]}>
+              <Pressable onPress={expandToCountry} style={[styles.retryBtn, { backgroundColor: colors.primary }]}>
                 <Text style={styles.retryText}>Elargir a toute la RDC</Text>
               </Pressable>
             ) : null}
@@ -264,6 +347,15 @@ const styles = StyleSheet.create({
   title: { fontSize: 26, fontWeight: '700', marginBottom: 4 },
   subtitle: { fontSize: 15, marginBottom: 16 },
   row: { gap: 16, marginBottom: 16 },
+  filterSummary: { borderWidth: 1, borderRadius: 16, padding: 12, marginBottom: 10, gap: 10 },
+  summaryTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  summaryTitle: { fontSize: 16, fontWeight: '800' },
+  summaryText: { fontSize: 13, marginTop: 3 },
+  filterButton: { borderRadius: 12, paddingVertical: 10, paddingHorizontal: 14 },
+  filterButtonText: { color: '#FFF', fontWeight: '700' },
+  activeChips: { gap: 8, paddingRight: 12 },
+  activeChip: { borderWidth: 1, borderRadius: 999, paddingVertical: 6, paddingHorizontal: 10 },
+  activeChipText: { fontSize: 12, fontWeight: '700' },
   filters: { borderWidth: 1, borderRadius: 16, padding: 12, marginBottom: 16, gap: 10 },
   filterChips: { gap: 8, paddingRight: 12 },
   filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center' },

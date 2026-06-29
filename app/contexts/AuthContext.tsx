@@ -115,6 +115,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       void (async () => {
         try {
           await loadProfilesForUser(uid)
+          void supabase.functions.invoke('profile-ip-context').catch(() => {})
         } catch (e) {
           console.warn(`[Auth] load profiles ${source}`, e)
           if (mounted && expectedUserIdRef.current === uid) {

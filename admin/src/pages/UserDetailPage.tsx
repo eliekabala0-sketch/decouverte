@@ -67,6 +67,7 @@ export function UserDetailPage() {
   const [packs, setPacks] = useState<PackRow[]>([])
   const [loading, setLoading] = useState(true)
   const [msg, setMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [adminRole, setAdminRole] = useState<string | null>(null)
 
   const [pw, setPw] = useState('')
   const [dm, setDm] = useState('')
@@ -77,6 +78,7 @@ export function UserDetailPage() {
   const [grantReason, setGrantReason] = useState('geste administrateur')
   const [creditForm, setCreditForm] = useState({ contact_credits: 0, photo_credits: 0, premium_credits: 0 })
   const [subscriptionForm, setSubscriptionForm] = useState({ plan_key: 'premium_admin', days: 30, reason: 'abonnement offert' })
+  const isSuperAdmin = adminRole === 'super_admin' || adminRole === 'superadmin'
 
   const [accForm, setAccForm] = useState({
     contact_quota: 0,
@@ -163,6 +165,16 @@ export function UserDetailPage() {
     setLoading(true)
     void load()
   }, [load])
+
+  useEffect(() => {
+    if (!adminUser?.id) return
+    void supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', adminUser.id)
+      .maybeSingle()
+      .then(({ data }) => setAdminRole((data as { role?: string | null } | null)?.role ?? null))
+  }, [adminUser?.id])
 
   const recordAudit = async (
     action: string,
@@ -424,6 +436,26 @@ export function UserDetailPage() {
     await load()
   }
 
+  const softDeleteUser = async () => {
+    if (!userId || !isSuperAdmin) return
+    setMsg(null)
+    if (!window.confirm('Suppression definitive cote produit: le compte test sera archive, masque du feed et bloque. Continuer ?')) return
+    const typed = window.prompt('Tapez SUPPRIMER pour confirmer cette suppression de compte test.')
+    if (typed !== 'SUPPRIMER') return
+    const reason = window.prompt('Raison de suppression ?', 'suppression compte test') ?? 'suppression compte test'
+    const { error } = await supabase.rpc('admin_soft_delete_user', {
+      p_profile_id: userId,
+      p_confirmation: typed,
+      p_reason: reason,
+    })
+    if (error) {
+      setMsg({ type: 'error', text: error.message })
+      return
+    }
+    setMsg({ type: 'success', text: 'Compte test archive, masque du feed et audite.' })
+    await load()
+  }
+
   if (!userId) {
     return (
       <div>
@@ -464,6 +496,35 @@ export function UserDetailPage() {
       <section className="dashboard-section">
         <h2>Profil</h2>
         <p>Statut : <strong>{profile.status}</strong> — vérifié : {profile.is_verified ? 'oui' : 'non'} — rôle : {profile.role ?? '—'}</p>
+        <div className="table-wrap" style={{ marginBottom: 12 }}>
+          <table className="data-table">
+            <tbody>
+              <tr>
+                <th>Ville declaree</th>
+                <td>{profile.city ?? '-'}{profile.commune ? ` / ${profile.commune}` : ''}</td>
+              </tr>
+              <tr>
+                <th>Ville IP approx.</th>
+                <td>{profile.ip_city ?? '-'}{profile.ip_region ? ` / ${profile.ip_region}` : ''}{profile.ip_country ? ` / ${profile.ip_country}` : ''}</td>
+              </tr>
+              <tr>
+                <th>Derniere IP approx.</th>
+                <td>{profile.ip_last_seen_at ? new Date(profile.ip_last_seen_at).toLocaleString('fr-FR') : '-'}</td>
+              </tr>
+              <tr>
+                <th>Ecart declare/IP</th>
+                <td>{profile.ip_city_mismatch ? 'Ecart possible' : 'Non detecte'}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        {isSuperAdmin && profile.status !== 'deleted' ? (
+          <div className="form-actions" style={{ marginBottom: 12 }}>
+            <button type="button" className="danger" onClick={() => void softDeleteUser()}>
+              Supprimer definitivement ce compte test
+            </button>
+          </div>
+        ) : null}
         {profile.photo ? (
           <p>
             Photo principale :{' '}

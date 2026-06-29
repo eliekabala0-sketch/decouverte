@@ -117,17 +117,28 @@ export default function PaymentsScreen() {
     void (async () => {
       const { data } = await supabase
         .from('payments')
-        .select('id,status,transaction_ref,metadata')
+        .select('id,status,transaction_ref,metadata,created_at,provider_message,provider_status_code')
         .eq('user_id', user.id)
         .eq('provider', PAYMENT_PROVIDER_VISIBILITY_BOOST)
-        .eq('status', 'pending')
+        .in('status', ['pending', 'failed'])
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle()
       if (!cancelled) {
-        const row = data as { id?: string; status?: PaymentStatus; transaction_ref?: string | null; metadata?: Record<string, unknown> | null } | null
+        const row = data as { id?: string; status?: PaymentStatus; transaction_ref?: string | null; metadata?: Record<string, unknown> | null; created_at?: string | null; provider_message?: string | null; provider_status_code?: string | number | null } | null
+        const createdAt = row?.created_at ?? new Date().toISOString()
+        const ageMs = Date.now() - new Date(createdAt).getTime()
+        const status: PaymentStatus = row?.status === 'failed' ? 'failed' : ageMs > 30 * 60 * 1000 ? 'expired' : (row?.status ?? 'pending')
         setBoostPendingId(String(row?.metadata?.gateway_transaction_id ?? row?.transaction_ref ?? row?.id ?? '') || null)
-        setBoostPendingStatus(row?.status ?? 'pending')
+        setBoostPendingStatus(status)
+        setBoostPendingMessage(
+          status === 'failed'
+            ? paymentFailureMessage({ status, transaction_id: String(row?.id ?? ''), message: '', provider_message: row?.provider_message, provider_status_code: row?.provider_status_code })
+            : status === 'expired'
+              ? 'Paiement trop ancien. Annulez et recommencez avec le bon numero, reseau ou devise.'
+              : null
+        )
+        setBoostPendingCause(providerFailureCause({ status, transaction_id: String(row?.id ?? ''), message: '', provider_message: row?.provider_message, provider_status_code: row?.provider_status_code }))
       }
     })()
     return () => {
@@ -246,17 +257,19 @@ export default function PaymentsScreen() {
               {paymentStatusLabel(boostPendingStatus)}. {boostPendingMessage || 'Verifiez apres validation sur votre telephone.'}
             </Text>
             {boostPendingCause ? <Text style={[styles.cardDesc, { color: c.warning }]}>{boostPendingCause}</Text> : null}
-            <Pressable
-              onPress={confirmBoostPayment}
-              disabled={boostBusy}
-              style={[styles.btn, { backgroundColor: c.primary, opacity: boostBusy ? 0.7 : 1 }]}
-            >
-              {boostBusy ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.btnText}>Verifier le paiement</Text>
-              )}
-            </Pressable>
+            {boostPendingStatus === 'pending' || boostPendingStatus === 'checking' ? (
+              <Pressable
+                onPress={confirmBoostPayment}
+                disabled={boostBusy}
+                style={[styles.btn, { backgroundColor: c.primary, opacity: boostBusy ? 0.7 : 1 }]}
+              >
+                {boostBusy ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.btnText}>Verifier le paiement</Text>
+                )}
+              </Pressable>
+            ) : null}
             <Pressable
               onPress={cancelBoostPayment}
               style={[styles.btn, { backgroundColor: c.surfaceElevated, borderWidth: 1, borderColor: c.border }]}
