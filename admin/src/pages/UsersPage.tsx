@@ -8,7 +8,9 @@ import './DashboardPage.css'
 const PAGE_SIZE = 25
 const PROFILE_SELECT_BASE =
   'id,phone,username,role,status,gender,city,commune,age,is_verified,mode_libre_active,mode_serieux_active,boost_reason,boosted_until,is_boosted,created_at,photo'
+const PROFILE_SELECT_WITH_CLEANUP = `${PROFILE_SELECT_BASE},admin_is_test_account,admin_test_reasons,admin_deleted_at`
 const PROFILE_SELECT_WITH_IP = `${PROFILE_SELECT_BASE},ip_city,ip_region,ip_country,ip_city_mismatch`
+const PROFILE_SELECT_WITH_IP_AND_CLEANUP = `${PROFILE_SELECT_WITH_CLEANUP},ip_city,ip_region,ip_country,ip_city_mismatch`
 
 type AdminUserRow = {
   id: string
@@ -28,6 +30,9 @@ type AdminUserRow = {
   is_boosted?: boolean | null
   created_at?: string | null
   photo?: string | null
+  admin_is_test_account?: boolean | null
+  admin_test_reasons?: string[] | null
+  admin_deleted_at?: string | null
   ip_city?: string | null
   ip_region?: string | null
   ip_country?: string | null
@@ -35,6 +40,18 @@ type AdminUserRow = {
   accessLabel?: string
   hasPack?: boolean
   detectedTest?: boolean
+}
+
+type TestAccountPreviewRow = {
+  id: string
+  email?: string | null
+  username?: string | null
+  phone?: string | null
+  city?: string | null
+  status?: string | null
+  created_at?: string | null
+  reasons?: string[] | null
+  action?: string | null
 }
 
 type AccessRow = {
@@ -62,7 +79,7 @@ type Filters = {
   pack: string
   date: string
   photo: string
-  testOnly: boolean
+  accountKind: 'all' | 'test' | 'real'
   includeDeleted: boolean
 }
 
@@ -82,7 +99,7 @@ const initialFilters: Filters = {
   pack: '',
   date: '',
   photo: '',
-  testOnly: false,
+  accountKind: 'all',
   includeDeleted: false,
 }
 
@@ -109,13 +126,21 @@ function formatAccess(row?: AccessRow): { label: string; hasPack: boolean } {
 function isDetectedTestAccount(row: AdminUserRow) {
   const username = String(row.username ?? '').toLowerCase()
   const phone = String(row.phone ?? '').toLowerCase()
+  const reasons = row.admin_test_reasons ?? []
   return (
+    !!row.admin_is_test_account ||
+    reasons.length > 0 ||
     username.includes('test') ||
     username.includes('smoke') ||
+    username.includes('admin action') ||
+    username.includes('admin_action') ||
     username.startsWith('p1_') ||
     username.startsWith('p2_') ||
-    username.includes('admin_action') ||
-    phone.includes('test')
+    username.includes('p1') ||
+    username.includes('p2') ||
+    phone.includes('test') ||
+    phone.includes('smoke') ||
+    phone.startsWith('+24390000010')
   )
 }
 
@@ -130,6 +155,10 @@ export function UsersPage() {
   const [error, setError] = useState<string | null>(null)
   const [adminRole, setAdminRole] = useState<string | null>(null)
   const [ipColumnsAvailable, setIpColumnsAvailable] = useState(true)
+  const [cleanupColumnsAvailable, setCleanupColumnsAvailable] = useState(true)
+  const [testPreview, setTestPreview] = useState<TestAccountPreviewRow[]>([])
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [cleanupMessage, setCleanupMessage] = useState<string | null>(null)
   const isSuperAdmin = adminRole === 'super_admin' || adminRole === 'superadmin'
 
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / PAGE_SIZE)), [total])
@@ -145,9 +174,12 @@ export function UsersPage() {
       return
     }
     const needsClientFilteredPage = !!filters.boost || !!filters.pack
+    const profileSelect = ipColumnsAvailable
+      ? (cleanupColumnsAvailable ? PROFILE_SELECT_WITH_IP_AND_CLEANUP : PROFILE_SELECT_WITH_IP)
+      : (cleanupColumnsAvailable ? PROFILE_SELECT_WITH_CLEANUP : PROFILE_SELECT_BASE)
     let query = supabase
       .from('profiles')
-      .select(ipColumnsAvailable ? PROFILE_SELECT_WITH_IP : PROFILE_SELECT_BASE, { count: 'exact' })
+      .select(profileSelect, { count: 'exact' })
       .order('created_at', { ascending: false })
 
     if (!filters.includeDeleted) query = query.neq('status', 'deleted')
@@ -168,13 +200,30 @@ export function UsersPage() {
     if (filters.date === 'old') query = query.lt('created_at', new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString())
     if (filters.photo === 'with') query = query.not('photo', 'is', null)
     if (filters.photo === 'without') query = query.is('photo', null)
-    if (filters.testOnly) query = query.or('username.ilike.%test%,username.ilike.%smoke%,username.ilike.p1_%,username.ilike.p2_%,username.ilike.%admin_action%,phone.ilike.%test%')
+    if (filters.accountKind === 'test') {
+      query = cleanupColumnsAvailable
+        ? query.or('admin_is_test_account.eq.true,username.ilike.%test%,username.ilike.%smoke%,username.ilike.%p1%,username.ilike.%p2%,username.ilike.%admin_action%,username.ilike.%admin action%,phone.ilike.%test%,phone.ilike.%smoke%,phone.ilike.+24390000010%')
+        : query.or('username.ilike.%test%,username.ilike.%smoke%,username.ilike.%p1%,username.ilike.%p2%,username.ilike.%admin_action%,username.ilike.%admin action%,phone.ilike.%test%,phone.ilike.%smoke%,phone.ilike.+24390000010%')
+    }
+    if (filters.accountKind === 'real') {
+      if (cleanupColumnsAvailable) query = query.eq('admin_is_test_account', false)
+      query = query.not('username', 'ilike', '%test%').not('username', 'ilike', '%smoke%').not('username', 'ilike', '%admin_action%').not('username', 'ilike', '%admin action%')
+      query = query.not('phone', 'ilike', '%test%').not('phone', 'ilike', '%smoke%').not('phone', 'ilike', '+24390000010%')
+    }
     query = needsClientFilteredPage
       ? query.range(0, 999)
       : query.range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1)
 
     const { data, error: loadError, count } = await query
     if (loadError) {
+      if (cleanupColumnsAvailable && /admin_(is_test_account|test_reasons|deleted_at)/i.test(loadError.message)) {
+        setCleanupColumnsAvailable(false)
+        setUsers([])
+        setTotal(0)
+        setError('Colonnes nettoyage comptes test indisponibles: appliquez la migration 038. Rechargement sans ces colonnes.')
+        setLoading(false)
+        return
+      }
       if (ipColumnsAvailable && /ip_(city|region|country|city_mismatch)/i.test(loadError.message)) {
         setIpColumnsAvailable(false)
         setUsers([])
@@ -214,7 +263,7 @@ export function UsersPage() {
       setTotal(count ?? enriched.length)
     }
     setLoading(false)
-  }, [filters, ipColumnsAvailable, page])
+  }, [filters, cleanupColumnsAvailable, ipColumnsAvailable, page])
 
   useEffect(() => {
     void load()
@@ -253,32 +302,50 @@ export function UsersPage() {
     await load()
   }
 
-  const cleanupVisibleTests = async () => {
+  const previewTestAccounts = async () => {
     if (!isSuperAdmin) return
-    const candidates = users.filter((row) => row.status !== 'deleted' && isDetectedTestAccount(row))
-    if (candidates.length === 0) {
-      setError('Aucun compte test detecte dans la page courante.')
+    setPreviewLoading(true)
+    setCleanupMessage(null)
+    setError(null)
+    const { data, error: previewError } = await supabase.rpc('admin_cleanup_test_accounts', {
+      p_confirmation: null,
+      p_dry_run: true,
+    })
+    if (previewError) {
+      setError(previewError.message)
+      setTestPreview([])
+    } else {
+      const rows = ((data ?? []) as TestAccountPreviewRow[]).filter((row) => row.status !== 'deleted')
+      setTestPreview(rows)
+      setCleanupMessage(`${rows.length} compte(s) test detecte(s).`)
+    }
+    setPreviewLoading(false)
+  }
+
+  const cleanupDetectedTests = async () => {
+    if (!isSuperAdmin) return
+    if (testPreview.length === 0) {
+      await previewTestAccounts()
       return
     }
-    const preview = candidates.slice(0, 20).map((u) => `${u.username ?? '-'} / ${u.phone ?? '-'} / ${u.id}`).join('\n')
-    if (!window.confirm(`Comptes test a archiver sur cette page: ${candidates.length}\n\n${preview}${candidates.length > 20 ? '\n...' : ''}\n\nContinuer ?`)) return
-    const typed = window.prompt('Tapez SUPPRIMER TESTS pour confirmer le nettoyage des comptes test visibles.')
+    const sample = testPreview.slice(0, 20).map((u) => `${u.username ?? '-'} / ${u.phone ?? '-'} / ${u.id}`).join('\n')
+    if (!window.confirm(`Comptes test detectes: ${testPreview.length}\n\n${sample}${testPreview.length > 20 ? '\n...' : ''}\n\nContinuer ?`)) return
+    const typed = window.prompt('Tapez SUPPRIMER TESTS pour confirmer le nettoyage global des comptes test.')
     if (typed !== 'SUPPRIMER TESTS') return
     setLoading(true)
     setError(null)
-    let deleted = 0
-    const failures: string[] = []
-    for (const row of candidates) {
-      const { error: actionError } = await supabase.rpc('admin_soft_delete_user', {
-        p_profile_id: row.id,
-        p_confirmation: 'SUPPRIMER',
-        p_reason: 'suppression comptes test batch',
-      })
-      if (actionError) failures.push(`${row.username ?? row.id}: ${actionError.message}`)
-      else deleted += 1
+    const { data, error: cleanupError } = await supabase.rpc('admin_cleanup_test_accounts', {
+      p_confirmation: typed,
+      p_dry_run: false,
+    })
+    if (cleanupError) {
+      setError(cleanupError.message)
+    } else {
+      const rows = (data ?? []) as TestAccountPreviewRow[]
+      setCleanupMessage(`${rows.length} compte(s) test archive(s), bloques et exclus du feed.`)
+      setTestPreview([])
     }
-    if (failures.length) setError(`${deleted} compte(s) test archive(s). Echecs: ${failures.slice(0, 3).join(' | ')}`)
-    else setError(`${deleted} compte(s) test archive(s) et exclus du feed.`)
+    setLoading(false)
     await load()
   }
 
@@ -288,6 +355,7 @@ export function UsersPage() {
       <h1 className="page-title">Utilisateurs</h1>
       <p className="page-subtitle">{total} profils. Filtres appliques cote requete avec pagination.</p>
       {error && <div className="dashboard-message dashboard-message-error" role="alert">{error}</div>}
+      {cleanupMessage && <div className="dashboard-message dashboard-message-success" role="status">{cleanupMessage}</div>}
 
       <section className="dashboard-section">
         <div className="form-grid">
@@ -306,19 +374,49 @@ export function UsersPage() {
           <div className="form-group"><label>Pack</label><select value={filters.pack} onChange={(e) => updateFilter('pack', e.target.value)}><option value="">Tous</option><option value="active">Pack actif</option><option value="none">Sans pack</option></select></div>
           <div className="form-group"><label>Inscription</label><select value={filters.date} onChange={(e) => updateFilter('date', e.target.value)}><option value="">Toutes</option><option value="recent">Recents</option><option value="old">Anciens</option></select></div>
           <div className="form-group"><label>Photo</label><select value={filters.photo} onChange={(e) => updateFilter('photo', e.target.value)}><option value="">Tous</option><option value="with">Avec photo</option><option value="without">Sans photo</option></select></div>
-          <label className="inline-check"><input type="checkbox" checked={filters.testOnly} onChange={(e) => updateFilter('testOnly', e.target.checked)} /> Comptes test</label>
+          <div className="form-group"><label>Type compte</label><select value={filters.accountKind} onChange={(e) => updateFilter('accountKind', e.target.value as Filters['accountKind'])}><option value="all">Tous</option><option value="test">Comptes test</option><option value="real">Comptes reels</option></select></div>
           <label className="inline-check"><input type="checkbox" checked={filters.includeDeleted} onChange={(e) => updateFilter('includeDeleted', e.target.checked)} /> Afficher archives</label>
         </div>
         <div className="form-actions">
           <button type="button" onClick={() => void load()}>Actualiser</button>
           <button type="button" className="secondary" onClick={() => { setFilters(initialFilters); setPage(0) }}>Reinitialiser filtres</button>
-          {isSuperAdmin && filters.testOnly ? (
-            <button type="button" className="danger" onClick={() => void cleanupVisibleTests()}>
-              Nettoyer les comptes de test visibles
-            </button>
+          {isSuperAdmin ? (
+            <>
+              <button type="button" className="secondary" onClick={() => void previewTestAccounts()} disabled={previewLoading}>
+                {previewLoading ? 'Detection...' : 'Previsualiser comptes test'}
+              </button>
+              <button type="button" className="danger" onClick={() => void cleanupDetectedTests()} disabled={previewLoading}>
+                Nettoyer les comptes de test
+              </button>
+            </>
           ) : null}
         </div>
       </section>
+
+      {testPreview.length > 0 ? (
+        <section className="dashboard-section">
+          <h2>Preview comptes test ({testPreview.length})</h2>
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead><tr><th>ID</th><th>Pseudo</th><th>Email</th><th>Telephone</th><th>Ville</th><th>Statut</th><th>Cree le</th><th>Raisons</th></tr></thead>
+              <tbody>
+                {testPreview.map((row) => (
+                  <tr key={row.id}>
+                    <td><code>{row.id}</code></td>
+                    <td>{row.username ?? '-'}</td>
+                    <td>{row.email ?? '-'}</td>
+                    <td>{row.phone ?? '-'}</td>
+                    <td>{row.city ?? '-'}</td>
+                    <td><span className={`badge badge-${row.status ?? 'active'}`}>{row.status ?? '-'}</span></td>
+                    <td>{row.created_at ? new Date(row.created_at).toLocaleDateString('fr-FR') : '-'}</td>
+                    <td>{(row.reasons ?? []).join(', ') || '-'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
 
       {loading ? <div className="page-loading">Chargement...</div> : (
         <>
@@ -332,7 +430,7 @@ export function UsersPage() {
               <tbody>
                 {users.length === 0 ? <tr><td colSpan={10}>Aucun profil.</td></tr> : users.map((u) => (
                   <tr key={u.id}>
-                    <td>{u.username ?? '-'}<br /><code>{u.id.slice(0, 8)}...</code>{u.detectedTest ? <><br /><span className="badge">Test</span></> : null}</td>
+                    <td>{u.username ?? '-'}<br /><code>{u.id.slice(0, 8)}...</code>{u.detectedTest ? <><br /><span className="badge">Test</span></> : null}{u.admin_deleted_at ? <><br /><span className="badge badge-banned">Archive</span></> : null}</td>
                     <td>{u.phone ?? '-'}</td>
                     <td><span className="badge">{genderLabel(u.gender)}</span></td>
                     <td>{u.city ?? '-'}{u.commune ? ` / ${u.commune}` : ''}<br />{u.age ?? '-'} ans</td>

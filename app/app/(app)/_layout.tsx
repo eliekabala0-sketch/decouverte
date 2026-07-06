@@ -16,7 +16,6 @@ export default function AppLayout() {
 
   if (!loading && !user) return <Redirect href="/(auth)/welcome" />
   if (!loading && user && !profile) return <Redirect href="/(auth)/create-profile" />
-  if (!loading && user && profile && !profile.photo) return <Redirect href="/(auth)/add-avatar" />
   if (!loading && user && profile && profile.status !== 'active') {
     const label = profile.status === 'banned'
       ? 'Votre compte est banni.'
@@ -35,6 +34,8 @@ export default function AppLayout() {
       </View>
     )
   }
+
+  if (!loading && user && profile && !profile.photo) return <Redirect href="/(auth)/add-avatar" />
 
   const showPublications = isOn('public_publications_enabled')
 
