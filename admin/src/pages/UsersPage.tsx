@@ -103,6 +103,13 @@ const initialFilters: Filters = {
   includeDeleted: false,
 }
 
+const TEST_ACCOUNT_CRITERIA = [
+  'email ou pseudo contenant test, smoke, p1, p2, tel_p2, tel_test',
+  'pseudo contenant admin_action ou admin action',
+  'telephone seed explicite +24390000010x',
+  'paiement/audit contenant test, smoke, p1, p2 ou admin grant',
+]
+
 function genderLabel(value?: string | null) {
   const normalized = String(value ?? '').toLowerCase()
   if (['f', 'femme', 'female'].includes(normalized)) return 'Femme'
@@ -158,8 +165,10 @@ export function UsersPage() {
   const [cleanupColumnsAvailable, setCleanupColumnsAvailable] = useState(true)
   const [testPreview, setTestPreview] = useState<TestAccountPreviewRow[]>([])
   const [previewLoading, setPreviewLoading] = useState(false)
+  const [cleanupConfirm, setCleanupConfirm] = useState('')
   const [cleanupMessage, setCleanupMessage] = useState<string | null>(null)
   const isSuperAdmin = adminRole === 'super_admin' || adminRole === 'superadmin'
+  const cleanupReady = isSuperAdmin && testPreview.length > 0 && cleanupConfirm === 'SUPPRIMER TESTS' && !previewLoading && !loading
 
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / PAGE_SIZE)), [total])
 
@@ -314,28 +323,24 @@ export function UsersPage() {
     if (previewError) {
       setError(previewError.message)
       setTestPreview([])
+      setCleanupConfirm('')
     } else {
       const rows = ((data ?? []) as TestAccountPreviewRow[]).filter((row) => row.status !== 'deleted')
       setTestPreview(rows)
+      setCleanupConfirm('')
       setCleanupMessage(`${rows.length} compte(s) test detecte(s).`)
     }
     setPreviewLoading(false)
   }
 
   const cleanupDetectedTests = async () => {
-    if (!isSuperAdmin) return
-    if (testPreview.length === 0) {
-      await previewTestAccounts()
-      return
-    }
+    if (!cleanupReady) return
     const sample = testPreview.slice(0, 20).map((u) => `${u.username ?? '-'} / ${u.phone ?? '-'} / ${u.id}`).join('\n')
-    if (!window.confirm(`Comptes test detectes: ${testPreview.length}\n\n${sample}${testPreview.length > 20 ? '\n...' : ''}\n\nContinuer ?`)) return
-    const typed = window.prompt('Tapez SUPPRIMER TESTS pour confirmer le nettoyage global des comptes test.')
-    if (typed !== 'SUPPRIMER TESTS') return
+    if (!window.confirm(`Comptes test detectes: ${testPreview.length}\n\n${sample}${testPreview.length > 20 ? '\n...' : ''}\n\nConfirmer le nettoyage global ?`)) return
     setLoading(true)
     setError(null)
     const { data, error: cleanupError } = await supabase.rpc('admin_cleanup_test_accounts', {
-      p_confirmation: typed,
+      p_confirmation: cleanupConfirm,
       p_dry_run: false,
     })
     if (cleanupError) {
@@ -344,6 +349,7 @@ export function UsersPage() {
       const rows = (data ?? []) as TestAccountPreviewRow[]
       setCleanupMessage(`${rows.length} compte(s) test archive(s), bloques et exclus du feed.`)
       setTestPreview([])
+      setCleanupConfirm('')
     }
     setLoading(false)
     await load()
@@ -358,6 +364,72 @@ export function UsersPage() {
       {cleanupMessage && <div className="dashboard-message dashboard-message-success" role="status">{cleanupMessage}</div>}
 
       <section className="dashboard-section">
+        <h2>Nettoyage des comptes test</h2>
+        {!isSuperAdmin ? (
+          <div className="dashboard-message dashboard-message-error" role="status">
+            Reserve super-admin. Votre role actuel: {adminRole ?? 'inconnu'}.
+          </div>
+        ) : null}
+        <div className="form-actions" style={{ marginBottom: 12 }}>
+          <button type="button" className="secondary" onClick={() => void previewTestAccounts()} disabled={!isSuperAdmin || previewLoading}>
+            {previewLoading ? 'Detection...' : 'Previsualiser les comptes test'}
+          </button>
+          <button type="button" className="danger" onClick={() => void cleanupDetectedTests()} disabled={!cleanupReady}>
+            Nettoyer les comptes test
+          </button>
+        </div>
+        <div className="table-wrap" style={{ marginBottom: 12 }}>
+          <table className="data-table">
+            <tbody>
+              <tr>
+                <th>Total detecte</th>
+                <td>{testPreview.length}</td>
+              </tr>
+              <tr>
+                <th>Confirmation</th>
+                <td>
+                  <input
+                    value={cleanupConfirm}
+                    onChange={(e) => setCleanupConfirm(e.target.value)}
+                    placeholder="SUPPRIMER TESTS"
+                    disabled={!isSuperAdmin || testPreview.length === 0 || previewLoading}
+                    style={{ maxWidth: 280 }}
+                  />
+                </td>
+              </tr>
+              <tr>
+                <th>Criteres</th>
+                <td>{TEST_ACCOUNT_CRITERIA.join(' ; ')}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        {testPreview.length > 0 ? (
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead><tr><th>ID</th><th>Pseudo</th><th>Email</th><th>Telephone</th><th>Ville</th><th>Statut</th><th>Cree le</th><th>Raisons</th></tr></thead>
+              <tbody>
+                {testPreview.slice(0, 25).map((row) => (
+                  <tr key={row.id}>
+                    <td><code>{row.id}</code></td>
+                    <td>{row.username ?? '-'}</td>
+                    <td>{row.email ?? '-'}</td>
+                    <td>{row.phone ?? '-'}</td>
+                    <td>{row.city ?? '-'}</td>
+                    <td><span className={`badge badge-${row.status ?? 'active'}`}>{row.status ?? '-'}</span></td>
+                    <td>{row.created_at ? new Date(row.created_at).toLocaleDateString('fr-FR') : '-'}</td>
+                    <td>{(row.reasons ?? []).join(', ') || '-'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {testPreview.length > 25 ? <p className="text-secondary">Apercu limite aux 25 premiers comptes.</p> : null}
+          </div>
+        ) : null}
+      </section>
+
+      <section className="dashboard-section">
+        <h2>Filtres utilisateurs</h2>
         <div className="form-grid">
           <div className="form-group"><label>Nom / pseudo</label><input value={filters.search} onChange={(e) => updateFilter('search', e.target.value)} /></div>
           <div className="form-group"><label>Telephone</label><input value={filters.phone} onChange={(e) => updateFilter('phone', e.target.value)} /></div>
@@ -380,43 +452,8 @@ export function UsersPage() {
         <div className="form-actions">
           <button type="button" onClick={() => void load()}>Actualiser</button>
           <button type="button" className="secondary" onClick={() => { setFilters(initialFilters); setPage(0) }}>Reinitialiser filtres</button>
-          {isSuperAdmin ? (
-            <>
-              <button type="button" className="secondary" onClick={() => void previewTestAccounts()} disabled={previewLoading}>
-                {previewLoading ? 'Detection...' : 'Previsualiser comptes test'}
-              </button>
-              <button type="button" className="danger" onClick={() => void cleanupDetectedTests()} disabled={previewLoading}>
-                Nettoyer les comptes de test
-              </button>
-            </>
-          ) : null}
         </div>
       </section>
-
-      {testPreview.length > 0 ? (
-        <section className="dashboard-section">
-          <h2>Preview comptes test ({testPreview.length})</h2>
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead><tr><th>ID</th><th>Pseudo</th><th>Email</th><th>Telephone</th><th>Ville</th><th>Statut</th><th>Cree le</th><th>Raisons</th></tr></thead>
-              <tbody>
-                {testPreview.map((row) => (
-                  <tr key={row.id}>
-                    <td><code>{row.id}</code></td>
-                    <td>{row.username ?? '-'}</td>
-                    <td>{row.email ?? '-'}</td>
-                    <td>{row.phone ?? '-'}</td>
-                    <td>{row.city ?? '-'}</td>
-                    <td><span className={`badge badge-${row.status ?? 'active'}`}>{row.status ?? '-'}</span></td>
-                    <td>{row.created_at ? new Date(row.created_at).toLocaleDateString('fr-FR') : '-'}</td>
-                    <td>{(row.reasons ?? []).join(', ') || '-'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      ) : null}
 
       {loading ? <div className="page-loading">Chargement...</div> : (
         <>
@@ -444,7 +481,7 @@ export function UsersPage() {
                       {u.status !== 'suspended' && <button type="button" className="secondary" onClick={() => void setStatus(u.id, 'suspended')}>Suspendre</button>}
                       {u.status !== 'banned' && <button type="button" className="secondary" onClick={() => void setStatus(u.id, 'banned')}>Bannir</button>}
                       {u.status !== 'active' && <button type="button" className="secondary" onClick={() => void setStatus(u.id, 'active')}>Restaurer</button>}
-                      {isSuperAdmin && u.status !== 'deleted' && <button type="button" className="danger" onClick={() => void softDelete(u)}>Supprimer test</button>}
+                      {isSuperAdmin && u.status !== 'deleted' && u.detectedTest && <button type="button" className="danger" onClick={() => void softDelete(u)}>Archiver test</button>}
                     </td>
                   </tr>
                 ))}
