@@ -97,28 +97,62 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
  * Lien stable avec Auth : public.profiles.id = auth.users.id (création profil app).
  * Ne pas utiliser profiles.user_id : colonne absente sur plusieurs déploiements réels.
  */
-async function fetchProfileIsAdmin(userId: string): Promise<{ ok: boolean; error: Error | null }> {
+type AdminRoleCheck = {
+  ok: boolean
+  error: Error | null
+  authUserId: string
+  role: unknown
+  is_admin: unknown
+  status: unknown
+  reason: string | null
+}
+
+function formatAdminDeniedMessage(check: Pick<AdminRoleCheck, 'authUserId' | 'role' | 'is_admin' | 'status' | 'reason'>): string {
+  return `Compte non autorise pour le dashboard admin. authUserId=${check.authUserId}; role=${String(check.role ?? 'null')}; is_admin=${String(check.is_admin ?? 'null')}; status=${String(check.status ?? 'null')}; raison=${check.reason ?? 'role_not_allowed'}.`
+}
+
+async function fetchProfileIsAdmin(userId: string): Promise<AdminRoleCheck> {
   if (!userId) {
-    return { ok: false, error: null }
+    return { ok: false, error: null, authUserId: '', role: null, is_admin: null, status: null, reason: 'missing_auth_user_id' }
   }
   try {
     const res = await withTimeout(
-      Promise.resolve(supabase.from('profiles').select('role').eq('id', userId).maybeSingle()),
+      Promise.resolve(supabase.from('profiles').select('role,is_admin,status').eq('id', userId).maybeSingle()),
       PROFILE_ROLE_TIMEOUT_MS,
-      'Lecture du rôle (profiles.id = auth.uid)'
+      'Lecture du role admin (profiles.id = auth.uid)'
     )
     if (res.error) {
-      return { ok: false, error: res.error instanceof Error ? res.error : new Error(String(res.error)) }
+      return {
+        ok: false,
+        error: res.error instanceof Error ? res.error : new Error(String(res.error)),
+        authUserId: userId,
+        role: null,
+        is_admin: null,
+        status: null,
+        reason: 'profile_read_error',
+      }
     }
-    const ok = roleIsAdmin((res.data as { role?: unknown } | null)?.role)
+    const row = (res.data as { role?: unknown; is_admin?: unknown; status?: unknown } | null) ?? null
+    const role = row?.role ?? null
+    const isAdminFlag = row?.is_admin ?? null
+    const status = row?.status ?? null
+    const ok = roleIsAdmin(role, isAdminFlag) && status !== 'banned' && status !== 'deleted'
+    const reason = ok
+      ? null
+      : status === 'banned' || status === 'deleted'
+        ? 'admin_profile_inactive'
+        : 'role_or_is_admin_not_allowed'
     logOnce('info', `[admin-auth] role-check:${userId}:${ok ? 'ok' : 'ko'}`, {
       authUserId: userId,
-      role: (res.data as { role?: unknown } | null)?.role ?? null,
+      role,
+      is_admin: isAdminFlag,
+      status,
       ok,
+      reason,
     }, 20000)
-    return { ok, error: null }
+    return { ok, error: null, authUserId: userId, role, is_admin: isAdminFlag, status, reason }
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e : new Error(String(e)) }
+    return { ok: false, error: e instanceof Error ? e : new Error(String(e)), authUserId: userId, role: null, is_admin: null, status: null, reason: 'exception' }
   }
 }
 
@@ -144,7 +178,8 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
         setAuthError(null)
         return
       }
-      const { ok, error } = await fetchProfileIsAdmin(current.id)
+      const roleCheck = await fetchProfileIsAdmin(current.id)
+      const { ok, error } = roleCheck
       if (cancelled) return
       if (error) {
         const message = error instanceof Error ? error.message : String(error)
@@ -180,8 +215,8 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
       setIsAdmin(ok)
       if (!ok) {
         validatedAdminUserIdRef.current = null
-        logOnce('warn', '[admin-auth] rôle non admin', { source, authUserId: current.id }, 15000)
-        setAuthError('Compte non autorisé pour le dashboard admin.')
+        logOnce('warn', '[admin-auth] role non admin', { source, authUserId: current.id, role: roleCheck.role, is_admin: roleCheck.is_admin, status: roleCheck.status, reason: roleCheck.reason }, 15000)
+        setAuthError(formatAdminDeniedMessage(roleCheck))
       } else {
         validatedAdminUserIdRef.current = current.id
         setAuthError(null)
@@ -312,7 +347,8 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
       return { error: new Error('Session invalide après connexion.') }
     }
 
-    const { ok, error: roleErr } = await fetchProfileIsAdmin(current.id)
+    const roleCheck = await fetchProfileIsAdmin(current.id)
+    const { ok, error: roleErr } = roleCheck
     if (roleErr) {
       setAuthError(
         'Impossible de vérifier le rôle admin (réseau, RLS ou délai). Réessayez dans un instant.'
@@ -324,12 +360,14 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
       return { error: roleErr }
     }
     if (!ok) {
-      setAuthError('Compte non autorisé pour le dashboard admin.')
+      const deniedMessage = formatAdminDeniedMessage(roleCheck)
+      logOnce('warn', '[admin-auth] signIn refuse', { authUserId: current.id, role: roleCheck.role, is_admin: roleCheck.is_admin, status: roleCheck.status, reason: roleCheck.reason }, 15000)
+      setAuthError(deniedMessage)
       await supabase.auth.signOut()
       setUser(null)
       validatedAdminUserIdRef.current = null
       setIsAdmin(false)
-      return { error: new Error('Compte non autorisé pour le dashboard admin.') }
+      return { error: new Error(deniedMessage) }
     }
     setUser(current)
     setIsAdmin(true)
