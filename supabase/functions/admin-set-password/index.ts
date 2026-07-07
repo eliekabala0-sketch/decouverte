@@ -39,8 +39,15 @@ Deno.serve(async (req) => {
     })
   }
 
-  const { data: prof } = await userClient.from('profiles').select('role').eq('id', userData.user.id).maybeSingle()
-  if ((prof as { role?: string } | null)?.role !== 'admin') {
+  const { data: prof } = await userClient.from('profiles').select('role,is_admin,status').eq('id', userData.user.id).maybeSingle()
+  const profile = prof as { role?: string | null; is_admin?: boolean | null; status?: string | null } | null
+  const role = String(profile?.role ?? '').trim().toLowerCase()
+  const isAllowedAdmin =
+    profile?.is_admin === true ||
+    role === 'admin' ||
+    role === 'super_admin' ||
+    role === 'superadmin'
+  if (!isAllowedAdmin || profile?.status === 'banned' || profile?.status === 'deleted') {
     return new Response(JSON.stringify({ error: 'Accès refusé' }), {
       status: 403,
       headers: { ...cors, 'Content-Type': 'application/json' },
