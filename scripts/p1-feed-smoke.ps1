@@ -3,6 +3,7 @@ $ErrorActionPreference = 'Stop'
 $envText = Get-Content -Raw -Path (Join-Path $PSScriptRoot '..\app\.env')
 $url = [regex]::Match($envText, 'EXPO_PUBLIC_SUPABASE_URL=(.+)').Groups[1].Value.Trim()
 $anon = [regex]::Match($envText, 'EXPO_PUBLIC_SUPABASE_ANON_KEY=(.+)').Groups[1].Value.Trim()
+$adminPassword = if ($env:DEC_ADMIN_PASSWORD) { $env:DEC_ADMIN_PASSWORD } else { 'Badiboss@1' }
 $pass = 'P1TestDc26!'
 $stamp = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
 $results = New-Object System.Collections.Generic.List[string]
@@ -98,7 +99,7 @@ $femaleBoost = Signup-And-Login "tel_p1_fb_$stamp@gmail.com" "+243982$stamp"
 $femaleViewer = Signup-And-Login "tel_p1_fv_$stamp@gmail.com" "+243983$stamp"
 $maleTarget = Signup-And-Login "tel_p1_mt_$stamp@gmail.com" "+243984$stamp"
 
-$adminLogin = Call-Json 'POST' ($url + '/auth/v1/token?grant_type=password') $anon @{ email = 'tel_243900000199@gmail.com'; password = 'TestDc26' }
+$adminLogin = Call-Json 'POST' ($url + '/auth/v1/token?grant_type=password') $anon @{ email = 'tel_243900000199@gmail.com'; password = $adminPassword }
 Add-Result 'login admin test' $adminLogin.ok "status $($adminLogin.status)"
 $adminToken = $adminLogin.body.access_token
 
