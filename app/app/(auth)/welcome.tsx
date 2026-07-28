@@ -3,6 +3,7 @@ import { Redirect, useRouter } from 'expo-router'
 import { useTheme } from '@/theme/ThemeContext'
 import { useAuth } from '@/contexts/AuthContext'
 import { APP_NAME } from '../../../lib/constants'
+import { InstallAppButton } from '@/components/InstallAppButton'
 
 export default function WelcomeScreen() {
   const router = useRouter()
@@ -21,6 +22,7 @@ export default function WelcomeScreen() {
         </Text>
       </View>
       <View style={styles.actions}>
+        <InstallAppButton />
         <Pressable
           onPress={() => router.push('/(auth)/login')}
           style={({ pressed }) => [

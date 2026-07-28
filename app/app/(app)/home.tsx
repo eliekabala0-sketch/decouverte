@@ -10,6 +10,7 @@ import { useNotificationCounters } from '@/lib/useNotificationCounters'
 import { supabase } from '@/lib/supabase'
 import { MODES } from '../../../lib/constants'
 import type { PublicPublication } from '../../../lib/types'
+import { InstallAppButton } from '@/components/InstallAppButton'
 
 function normalizeGender(gender?: string | null) {
   const value = String(gender ?? '').trim().toLowerCase()
@@ -84,6 +85,9 @@ export default function HomeScreen() {
         <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
           Explorez les profils selon votre intention
         </Text>
+        <View style={styles.installButton}>
+          <InstallAppButton />
+        </View>
       </View>
 
       <View style={styles.cards}>
@@ -254,6 +258,7 @@ function QuickLink(props: {
 const styles = StyleSheet.create({
   container: { flex: 1, paddingHorizontal: 24 },
   header: { marginBottom: 32 },
+  installButton: { marginTop: 18 },
   greeting: { fontSize: 15, marginBottom: 4 },
   title: { fontSize: 26, fontWeight: '700', marginBottom: 8 },
   subtitle: { fontSize: 16 },

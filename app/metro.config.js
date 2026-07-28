@@ -18,8 +18,10 @@ config.resolver.nodeModulesPaths = [
 config.resolver.blockList = exclusionList([
   new RegExp(`${escapePathForRegex(path.resolve(monorepoRoot, '.codex'))}[/\\\\].*`),
   new RegExp(`${escapePathForRegex(path.resolve(monorepoRoot, '.git'))}[/\\\\].*`),
-  new RegExp(`${escapePathForRegex(path.resolve(monorepoRoot, 'admin', 'dist'))}[/\\\\].*`),
-  new RegExp(`${escapePathForRegex(path.resolve(monorepoRoot, 'supabase', '.temp'))}[/\\\\].*`),
+  new RegExp(`${escapePathForRegex(path.resolve(monorepoRoot, 'admin'))}[/\\\\].*`),
+  new RegExp(`${escapePathForRegex(path.resolve(monorepoRoot, 'docs'))}[/\\\\].*`),
+  new RegExp(`${escapePathForRegex(path.resolve(monorepoRoot, 'scripts'))}[/\\\\].*`),
+  new RegExp(`${escapePathForRegex(path.resolve(monorepoRoot, 'supabase'))}[/\\\\].*`),
 ])
 
 module.exports = config
