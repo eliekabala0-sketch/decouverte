@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { supabase } from '@/lib/supabase'
+import { apiRequest } from '@/lib/api'
 
 const DEFAULTS: Record<string, boolean> = {
   mode_libre_enabled: true,
@@ -32,7 +32,7 @@ async function loadFlags(force = false): Promise<Record<string, boolean>> {
   if (!force && inFlight) return inFlight
 
   inFlight = (async () => {
-    const { data } = await supabase.from('admin_settings').select('key,value')
+    const { data } = await apiRequest<{ data: Row[] }>('/v1/settings')
     const next: Record<string, boolean> = {}
     ;((data ?? []) as Row[]).forEach((row) => {
       if (typeof row.value === 'boolean') next[row.key] = row.value

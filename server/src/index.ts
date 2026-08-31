@@ -9,7 +9,7 @@ import { z } from 'zod'
 import { allowedOrigins, config } from './config.js'
 import { db } from './db.js'
 import { createCall, endCall, joinCall } from './calls.js'
-import { issueAccessToken, issueRefreshToken, refreshSession, requireAuth, verifyAccessToken, verifyCredentials } from './auth.js'
+import { issueAccessToken, issueRefreshToken, refreshSession, requireAuth, verifyAccessToken, verifyCredentials, type AuthedRequest } from './auth.js'
 import { appEvents } from './events.js'
 import { getConversation, listConversations, listMessages, markRead, sendMessage } from './conversations.js'
 
@@ -69,6 +69,64 @@ app.post('/v1/auth/refresh', async (request, response) => {
   } catch {
     response.status(401).json({ error: 'invalid_refresh_token' })
   }
+})
+
+app.get('/v1/me', requireAuth, async (request, response) => {
+  const userId = (request as AuthedRequest).user!.id
+  const [[users], [profiles], [access]] = await Promise.all([
+    db.query<import('mysql2').RowDataPacket[]>('SELECT id,email,phone,role,status,created_at FROM users WHERE id=? LIMIT 1', [userId]),
+    db.query<import('mysql2').RowDataPacket[]>('SELECT * FROM profiles WHERE id=? LIMIT 1', [userId]),
+    db.query<import('mysql2').RowDataPacket[]>('SELECT * FROM profile_access WHERE user_id=? LIMIT 1', [userId]),
+  ])
+  if (!users[0]) return response.status(404).json({ error: 'user_not_found' })
+  response.json({ user: users[0], profile: profiles[0] ?? null, profileAccess: access[0] ?? null })
+})
+
+app.get('/v1/settings', requireAuth, async (_request, response) => {
+  const [rows] = await db.query<import('mysql2').RowDataPacket[]>('SELECT `key`,value FROM admin_settings')
+  response.json({ data: rows })
+})
+
+app.get('/v1/publications', requireAuth, async (request, response) => {
+  const limit = Math.min(100, Math.max(1, Number(request.query.limit ?? 20)))
+  const [rows] = await db.query<import('mysql2').RowDataPacket[]>(
+    'SELECT * FROM public_publications WHERE is_active=1 ORDER BY is_pinned DESC,created_at DESC LIMIT ?', [limit],
+  )
+  response.json({ data: rows })
+})
+
+app.get('/v1/profiles/feed', requireAuth, async (request, response) => {
+  const userId = (request as AuthedRequest).user!.id
+  const page = Math.max(0, Number(request.query.page ?? 0))
+  const pageSize = Math.min(50, Math.max(1, Number(request.query.pageSize ?? 20)))
+  const clauses = ['status=?', 'id<>?']
+  const params: unknown[] = ['active', userId]
+  const mode = request.query.mode === 'serieux' ? 'mode_serieux_active' : 'mode_libre_active'
+  clauses.push(`${mode}=1`)
+  for (const [key, column] of [['city', 'city'], ['commune', 'commune'], ['gender', 'gender']] as const) {
+    const value = String(request.query[key] ?? '').trim()
+    if (value) { clauses.push(`${column}=?`); params.push(value) }
+  }
+  if (request.query.minAge) { clauses.push('age>=?'); params.push(Number(request.query.minAge)) }
+  if (request.query.maxAge) { clauses.push('age<=?'); params.push(Number(request.query.maxAge)) }
+  if (request.query.verified === 'true') clauses.push('is_verified=1')
+  if (request.query.withPhoto === 'true') clauses.push("photo IS NOT NULL AND photo<>''")
+  const where = clauses.join(' AND ')
+  const [[count], [rows]] = await Promise.all([
+    db.query<import('mysql2').RowDataPacket[]>(`SELECT COUNT(*) total FROM profiles WHERE ${where}`, params),
+    db.query<import('mysql2').RowDataPacket[]>(`SELECT id,created_at,gender,city,commune,status,is_verified,username,age,mode_libre_active,mode_serieux_active,boost_reason,boosted_until,is_boosted,country,role,photo,bio FROM profiles WHERE ${where} ORDER BY is_boosted DESC,boosted_until DESC,created_at DESC LIMIT ? OFFSET ?`, [...params, pageSize, page * pageSize]),
+  ])
+  response.json({ profiles: rows, totalCount: Number(count[0].total) })
+})
+
+app.get('/v1/notifications/counts', requireAuth, async (request, response) => {
+  const userId = (request as AuthedRequest).user!.id
+  const [[unread], [announcement], [publications]] = await Promise.all([
+    db.query<import('mysql2').RowDataPacket[]>(`SELECT COUNT(*) total FROM messages m JOIN conversation_participants cp ON cp.conversation_id=m.conversation_id AND cp.user_id=? WHERE m.sender_id<>? AND m.read_at IS NULL`, [userId, userId]),
+    db.query<import('mysql2').RowDataPacket[]>(`SELECT EXISTS(SELECT 1 FROM mass_messages m LEFT JOIN user_announcement_read_state s ON s.user_id=? WHERE m.sent_at IS NOT NULL AND m.sent_at>COALESCE(s.last_read_announcements_at,'1970-01-01') LIMIT 1) total`, [userId]),
+    db.query<import('mysql2').RowDataPacket[]>(`SELECT COUNT(*) total FROM public_publications p LEFT JOIN user_publication_read_state s ON s.user_id=? WHERE p.is_active=1 AND p.created_at>COALESCE(s.last_read_publications_at,'1970-01-01')`, [userId]),
+  ])
+  response.json({ unreadMessages: Number(unread[0].total), announcementDot: Boolean(announcement[0].total), newPublications: Number(publications[0].total) })
 })
 
 app.post('/v1/calls', requireAuth, createCall)

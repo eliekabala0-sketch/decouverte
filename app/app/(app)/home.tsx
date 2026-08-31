@@ -7,7 +7,7 @@ import { useTheme } from '@/theme/ThemeContext'
 import { useAuth } from '@/contexts/AuthContext'
 import { useAppFeatureFlags } from '@/lib/useAppFeatureFlags'
 import { useNotificationCounters } from '@/lib/useNotificationCounters'
-import { supabase } from '@/lib/supabase'
+import { apiRequest } from '@/lib/api'
 import { MODES } from '../../../lib/constants'
 import type { PublicPublication } from '../../../lib/types'
 import { InstallAppButton } from '@/components/InstallAppButton'
@@ -48,13 +48,7 @@ export default function HomeScreen() {
       setRecentPublications([])
       return
     }
-    const { data } = await supabase
-      .from('public_publications')
-      .select('*')
-      .eq('is_active', true)
-      .order('is_pinned', { ascending: false })
-      .order('created_at', { ascending: false })
-      .limit(3)
+    const { data } = await apiRequest<{ data: PublicPublication[] }>('/v1/publications?limit=3')
     setRecentPublications((data ?? []) as PublicPublication[])
   }, [pubsOn])
 

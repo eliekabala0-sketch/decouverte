@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase'
 import type { Profile } from '../../lib/types'
+import { apiBaseUrl, apiRequest } from '@/lib/api'
 
 export type FeedMode = 'libre' | 'serieux'
 
@@ -51,6 +52,17 @@ async function getLegacyProfileFeed(mode: FeedMode, page: number, pageSize: numb
 }
 
 export async function getProfileFeed(mode: FeedMode, page: number, pageSize: number, filters: ProfileFeedFilters = {}): Promise<ProfileFeedResult> {
+  if (apiBaseUrl) {
+    const query = new URLSearchParams({ mode, page: String(page), pageSize: String(pageSize) })
+    if (!filters.expandScope && filters.city?.trim()) query.set('city', filters.city.trim())
+    if (!filters.expandScope && filters.commune?.trim()) query.set('commune', filters.commune.trim())
+    if (filters.targetGender && filters.targetGender !== 'all') query.set('gender', filters.targetGender)
+    if (filters.minAge != null) query.set('minAge', String(filters.minAge))
+    if (filters.maxAge != null) query.set('maxAge', String(filters.maxAge))
+    if (filters.verifiedOnly) query.set('verified', 'true')
+    if (filters.withPhotoOnly) query.set('withPhoto', 'true')
+    return apiRequest<ProfileFeedResult>(`/v1/profiles/feed?${query.toString()}`)
+  }
   if (!hasFilteredRequest(filters)) {
     return getLegacyProfileFeed(mode, page, pageSize)
   }

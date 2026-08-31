@@ -1,24 +1,34 @@
 import Constants from 'expo-constants'
-import { supabase } from '@/lib/supabase'
+import { getApiSession, setApiSession, type ApiSession } from '@/lib/session'
 
 const extra = Constants.expoConfig?.extra ?? {}
 const apiUrl = String(process.env.EXPO_PUBLIC_API_URL ?? extra.EXPO_PUBLIC_API_URL ?? '').replace(/\/$/, '')
 export const apiBaseUrl = apiUrl
-let cachedToken: { value: string; expiresAt: number } | null = null
-
 export async function apiAccessToken() {
-  if (cachedToken && cachedToken.expiresAt > Date.now() + 30_000) return cachedToken.value
-  const { data } = await supabase.auth.getSession()
-  const sourceToken = data.session?.access_token
-  if (!sourceToken) throw new Error('Session utilisateur indisponible.')
   if (!apiUrl) throw new Error('Le nouveau serveur Découverte n’est pas encore configuré.')
-  const response = await fetch(`${apiUrl}/v1/auth/exchange`, {
-    method: 'POST', headers: { Authorization: `Bearer ${sourceToken}` },
+  let session = await getApiSession()
+  if (!session) throw new Error('Session utilisateur indisponible.')
+  if (session.expiresAt > Date.now() + 30_000) return session.accessToken
+  const response = await fetch(`${apiUrl}/v1/auth/refresh`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refreshToken: session.refreshToken }),
   })
   const payload = await response.json()
-  if (!response.ok) throw new Error(payload.error ?? 'Impossible de sécuriser la session d’appel.')
-  cachedToken = { value: payload.accessToken, expiresAt: Date.now() + Number(payload.expiresIn ?? 900) * 1000 }
-  return cachedToken.value
+  if (!response.ok) { await setApiSession(null); throw new Error('Session expirée.') }
+  session = { ...payload, expiresAt: Date.now() + Number(payload.expiresIn ?? 900) * 1000 } as ApiSession
+  await setApiSession(session)
+  return session.accessToken
+}
+
+export async function apiLogin(email: string, password: string) {
+  if (!apiUrl) throw new Error('Le serveur Découverte n’est pas configuré.')
+  const response = await fetch(`${apiUrl}/v1/auth/login`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }),
+  })
+  const payload = await response.json()
+  if (!response.ok) throw new Error(payload.error ?? 'invalid_credentials')
+  const session = { ...payload, expiresAt: Date.now() + Number(payload.expiresIn ?? 900) * 1000 } as ApiSession
+  await setApiSession(session)
+  return session
 }
 
 export async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {

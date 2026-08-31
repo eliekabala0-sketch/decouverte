@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { View, Text, TextInput, Pressable, ScrollView, StyleSheet, Modal, FlatList } from 'react-native'
 import { Redirect, useRouter } from 'expo-router'
-import type { User } from '@supabase/supabase-js'
+import type { ApiUser } from '@/lib/session'
 import { useTheme } from '@/theme/ThemeContext'
 import { useAuth } from '@/contexts/AuthContext'
 import { supabase } from '@/lib/supabase'
@@ -14,10 +14,8 @@ const KNOWN_CITIES_RDC = [
   'Bandundu', 'Mwene-Ditu', 'Beni', 'Kasumbalesa', 'Kalemie', 'Mbandaka', 'Moanda', 'Sakania', 'Kamina', 'Kenge',
 ]
 
-function phoneFromUser(u: User | null): string {
+function phoneFromUser(u: ApiUser | null): string {
   if (!u) return ''
-  const meta = u.user_metadata as { phone?: string } | undefined
-  if (meta?.phone && String(meta.phone).trim()) return String(meta.phone).trim()
   const em = u.email ?? ''
   const m = em.match(/^tel_(\d+)@/)
   if (m) return `+${m[1]}`

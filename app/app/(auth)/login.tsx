@@ -2,8 +2,7 @@ import { useState } from 'react'
 import { View, Text, TextInput, Pressable, StyleSheet, KeyboardAvoidingView, Platform, Alert } from 'react-native'
 import { useRouter } from 'expo-router'
 import { useTheme } from '@/theme/ThemeContext'
-import { useAuth } from '@/contexts/AuthContext'
-import { supabase } from '@/lib/supabase'
+import { apiLogin } from '@/lib/api'
 import { syntheticEmailsForSignIn } from '../../../lib/authSyntheticEmail'
 
 async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
@@ -33,26 +32,21 @@ export default function LoginScreen() {
       let lastError: any = null
       let loggedIn = false
       for (const email of candidateEmails) {
-        const { error } = await withTimeout(
-          supabase.auth.signInWithPassword({ email, password }),
-          12000
-        )
-        if (!error) {
+        try {
+          await withTimeout(apiLogin(email, password), 12000)
           loggedIn = true
           break
-        }
-        lastError = error
-        const status = (error as { status?: number }).status
-        const msg = (error.message || '').toLowerCase()
-        if (status === 429 || msg.includes('too many requests')) {
-          setErrorText('Trop de tentatives. Réessayez dans quelques minutes.')
-          return
-        }
-        // Si ce n'est pas un problème d'identifiants, on arrête et remonte l'erreur.
-        const code = (error as { code?: string }).code
-        if (!(code === 'invalid_credentials' || msg.includes('invalid login credentials'))) {
-          setErrorText(error.message || 'Erreur de connexion.')
-          return
+        } catch (error) {
+          lastError = error
+          const msg = error instanceof Error ? error.message.toLowerCase() : ''
+          if (msg.includes('too many') || msg.includes('429')) {
+            setErrorText('Trop de tentatives. Réessayez dans quelques minutes.')
+            return
+          }
+          if (!msg.includes('invalid_credentials')) {
+            setErrorText(error instanceof Error ? error.message : 'Erreur de connexion.')
+            return
+          }
         }
       }
       if (!loggedIn) {

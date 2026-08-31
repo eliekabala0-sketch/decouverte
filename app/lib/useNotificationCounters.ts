@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase'
 import { useAppFeatureFlags } from '@/lib/useAppFeatureFlags'
 import { canViewFullProfiles, remainingContacts } from '../../lib/access'
 import type { MassMessage, ProfileAccess } from '../../lib/types'
+import { apiRequest, apiBaseUrl } from '@/lib/api'
 
 type Counters = {
   announcementDot: boolean
@@ -139,6 +140,11 @@ export function useNotificationCounters() {
 
     sharedKey = key
     sharedRefresh = (async () => {
+      if (apiBaseUrl) {
+        const next = await apiRequest<Counters>('/v1/notifications/counts')
+        emit(next)
+        return next
+      }
       const conversations = await supabase
         .from('conversations')
         .select('id')
@@ -233,6 +239,10 @@ export function useNotificationCounters() {
 
   useEffect(() => {
     if (!user?.id) return
+    if (apiBaseUrl) {
+      const timer = setInterval(() => void refreshCounters(), 15_000)
+      return () => clearInterval(timer)
+    }
     subscribeRealtime(user.id)
     return () => {
       unsubscribeRealtime(user.id)
