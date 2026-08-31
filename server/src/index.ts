@@ -119,6 +119,37 @@ app.get('/v1/profiles/feed', requireAuth, async (request, response) => {
   response.json({ profiles: rows, totalCount: Number(count[0].total) })
 })
 
+app.get('/v1/profiles/:profileId', requireAuth, async (request, response) => {
+  const [rows] = await db.query<import('mysql2').RowDataPacket[]>('SELECT * FROM profiles WHERE id=? AND status=? LIMIT 1', [request.params.profileId, 'active'])
+  if (!rows[0]) return response.status(404).json({ error: 'profile_not_found' })
+  response.json({ profile: rows[0] })
+})
+
+app.post('/v1/conversations', requireAuth, async (request, response) => {
+  const userId = (request as AuthedRequest).user!.id
+  const parsed = z.object({ participantId: z.string().uuid() }).safeParse(request.body)
+  if (!parsed.success || parsed.data.participantId === userId) return response.status(400).json({ error: 'invalid_participant' })
+  const [existing] = await db.query<import('mysql2').RowDataPacket[]>(`SELECT cp1.conversation_id id FROM conversation_participants cp1 JOIN conversation_participants cp2 ON cp2.conversation_id=cp1.conversation_id AND cp2.user_id=? WHERE cp1.user_id=? LIMIT 1`, [parsed.data.participantId, userId])
+  if (existing[0]) return response.json({ id: existing[0].id })
+  const id = crypto.randomUUID()
+  const connection = await db.getConnection()
+  try {
+    await connection.beginTransaction()
+    await connection.execute('INSERT INTO conversations (id,last_message_at,created_at) VALUES (?,CURRENT_TIMESTAMP(3),CURRENT_TIMESTAMP(3))', [id])
+    await connection.execute('INSERT INTO conversation_participants (conversation_id,user_id) VALUES (?,?),(?,?)', [id, userId, id, parsed.data.participantId])
+    await connection.commit()
+    response.status(201).json({ id })
+  } catch (error) { await connection.rollback(); throw error } finally { connection.release() }
+})
+
+app.post('/v1/reports', requireAuth, async (request, response) => {
+  const userId = (request as AuthedRequest).user!.id
+  const parsed = z.object({ reportedId: z.string().uuid(), type: z.string().max(80), reason: z.string().max(2000) }).safeParse(request.body)
+  if (!parsed.success) return response.status(400).json({ error: 'invalid_report' })
+  await db.execute('INSERT INTO reports (id,reporter_id,reported_id,type,reason,status,created_at) VALUES (?,?,?,?,?,\'pending\',CURRENT_TIMESTAMP(3))', [crypto.randomUUID(), userId, parsed.data.reportedId, parsed.data.type, parsed.data.reason])
+  response.status(201).json({ ok: true })
+})
+
 app.get('/v1/notifications/counts', requireAuth, async (request, response) => {
   const userId = (request as AuthedRequest).user!.id
   const [[unread], [announcement], [publications]] = await Promise.all([

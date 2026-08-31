@@ -22,6 +22,7 @@ import { getProfilePrivateDetails } from '../../../lib/profilePrivateDetailsRpc'
 import { listProfilePhotos, type ProfilePhotoRow } from '../../../lib/profilePhotos'
 import { unlockProfileContact, unlockProfilePhoto } from '../../../lib/profileAccessRpc'
 import { blockProfile } from '../../../lib/profileModerationRpc'
+import { apiBaseUrl, apiRequest } from '@/lib/api'
 
 function normalizeGender(gender?: string | null) {
   const value = String(gender ?? '').trim().toLowerCase()
@@ -58,6 +59,14 @@ export default function ProfileDetailScreen() {
   useEffect(() => {
     if (!params.id) return
     const load = async () => {
+      if (apiBaseUrl) {
+        try {
+          const { profile } = await apiRequest<{ profile: Profile }>(`/v1/profiles/${params.id}`)
+          setProfile(profile)
+        } catch { setProfile(null) }
+        finally { setLoading(false) }
+        return
+      }
       const core =
         'id,created_at,gender,city,commune,status,is_verified,username,age,boost_reason,boosted_until,is_boosted,country,role'
       const { data: coreRow, error: coreErr } = await supabase.from('profiles').select(core).eq('id', params.id).single()
@@ -206,6 +215,11 @@ export default function ProfileDetailScreen() {
     if (!user?.id || !profile) return
     setOpeningChat(true)
     try {
+      if (apiBaseUrl) {
+        const result = await apiRequest<{ id: string }>('/v1/conversations', { method: 'POST', body: JSON.stringify({ participantId: profile.id }) })
+        router.push({ pathname: '/(app)/conversation/[id]', params: { id: result.id } })
+        return
+      }
       const { data: existing } = await supabase
         .from('conversations')
         .select('id,participant_ids')
@@ -280,6 +294,11 @@ export default function ProfileDetailScreen() {
           onPress: async () => {
             setReporting(true)
             try {
+              if (apiBaseUrl) {
+                await apiRequest('/v1/reports', { method: 'POST', body: JSON.stringify({ reportedId: profile.id, type: 'inappropriate', reason: "Signalé depuis l'app par l'utilisateur" }) })
+                Alert.alert('Merci', 'Votre signalement a été enregistré. L\'équipe le traitera.')
+                return
+              }
               const { error } = await supabase.from('reports').insert({
                 reporter_id: user.id,
                 reported_id: profile.id,
