@@ -7,3 +7,6 @@ app/dist/
 admin/dist/
 .env
 *.log
+.migration/
+server/migration-data/
+supabase/.temp/

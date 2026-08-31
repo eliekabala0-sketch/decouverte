@@ -9,6 +9,7 @@
     "start": "node dist/src/index.js",
     "db:schema": "tsx scripts/apply-schema.ts",
     "db:migrate": "tsx scripts/migrate-from-supabase.ts",
+    "db:migrate:dump": "tsx scripts/migrate-from-dump.ts",
     "storage:migrate": "tsx scripts/migrate-storage.ts",
     "db:verify": "tsx scripts/verify-migration.ts",
     "typecheck": "tsc --noEmit"

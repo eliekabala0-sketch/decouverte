@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS profiles (
   admin_deleted_at DATETIME(3), admin_deleted_by CHAR(36), admin_delete_reason TEXT,
   admin_is_test_account BOOLEAN NOT NULL DEFAULT FALSE, admin_test_reasons JSON NOT NULL,
   is_admin BOOLEAN NOT NULL DEFAULT FALSE,
+  looking_for VARCHAR(80), subscription_status VARCHAR(80),
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   CONSTRAINT fk_profiles_user FOREIGN KEY (id) REFERENCES users(id) ON DELETE CASCADE,
@@ -42,7 +43,8 @@ CREATE TABLE IF NOT EXISTS profiles (
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS profile_access (
-  user_id CHAR(36) PRIMARY KEY, profiles_access_until DATETIME(3),
+  user_id CHAR(36) PRIMARY KEY, id CHAR(36), profiles_access BOOLEAN,
+  profiles_access_until DATETIME(3), created_at DATETIME(3),
   contact_quota INT NOT NULL DEFAULT 0, contact_quota_used INT NOT NULL DEFAULT 0,
   photo_quota INT NOT NULL DEFAULT 0, photo_quota_used INT NOT NULL DEFAULT 0,
   all_profiles_access BOOLEAN NOT NULL DEFAULT FALSE,
@@ -135,6 +137,7 @@ CREATE TABLE IF NOT EXISTS conversation_participants (
 
 CREATE TABLE IF NOT EXISTS messages (
   id CHAR(36) PRIMARY KEY, conversation_id CHAR(36) NOT NULL, sender_id CHAR(36) NOT NULL,
+  sender CHAR(36), receiver CHAR(36),
   content TEXT NOT NULL, message_type VARCHAR(30) NOT NULL DEFAULT 'text', media_url TEXT,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3), read_at DATETIME(3), deleted_at DATETIME(3),
   CONSTRAINT fk_messages_conversation FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
@@ -160,7 +163,8 @@ CREATE TABLE IF NOT EXISTS ad_campaigns (
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS reports (
-  id CHAR(36) PRIMARY KEY, reporter_id CHAR(36), reported_id CHAR(36), type VARCHAR(80), reason TEXT,
+  id CHAR(36) PRIMARY KEY, reporter_id CHAR(36), reported_user_id CHAR(36), reported_id CHAR(36),
+  type VARCHAR(80), reason TEXT, details TEXT,
   status VARCHAR(30) NOT NULL, created_at DATETIME(3) NOT NULL, resolved_at DATETIME(3), resolved_by CHAR(36),
   KEY idx_reports_status_created (status, created_at DESC),
   KEY idx_reports_reported (reported_id, created_at DESC)
@@ -201,6 +205,24 @@ CREATE TABLE IF NOT EXISTS audit_events (
   id CHAR(36) PRIMARY KEY, actor_id CHAR(36), target_user_id CHAR(36), action VARCHAR(120) NOT NULL,
   entity_type VARCHAR(120), entity_id VARCHAR(190), reason TEXT, metadata JSON NOT NULL, created_at DATETIME(3) NOT NULL,
   KEY idx_audit_actor_created (actor_id, created_at DESC), KEY idx_audit_target_created (target_user_id, created_at DESC)
+) ENGINE=InnoDB;
+
+-- Tables historiques conservées même si l'application actuelle ne les lit plus.
+CREATE TABLE IF NOT EXISTS app_settings (
+  id BIGINT PRIMARY KEY, setting_key VARCHAR(191) NOT NULL UNIQUE, setting_value LONGTEXT,
+  description TEXT, updated_at DATETIME(3), KEY idx_app_settings_key (setting_key)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS matches (
+  id BIGINT PRIMARY KEY, user1 CHAR(36), user2 CHAR(36), created_at DATETIME(3),
+  KEY idx_matches_user1 (user1), KEY idx_matches_user2 (user2)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS subscriptions (
+  id BIGINT PRIMARY KEY, user_id CHAR(36), plan_name VARCHAR(191) NOT NULL,
+  amount DECIMAL(12,2) NOT NULL DEFAULT 0, currency VARCHAR(16) NOT NULL DEFAULT 'USD',
+  status VARCHAR(32) NOT NULL DEFAULT 'pending', start_date DATETIME(3), end_date DATETIME(3),
+  created_at DATETIME(3), KEY idx_subscriptions_user (user_id), KEY idx_subscriptions_status (status)
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS call_sessions (
