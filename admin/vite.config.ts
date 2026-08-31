@@ -4,6 +4,7 @@ import path from 'path'
 
 const allowedHosts = [
   'decouverte-production.up.railway.app',
+  'decouverte-admin-production.up.railway.app',
   'localhost',
   '127.0.0.1',
 ]
@@ -16,7 +17,7 @@ export default defineConfig({
       // Admin runtime (Vite browser) should use import.meta.env only
       '@lib': path.resolve(__dirname, './src/lib'),
       // Shared types/constants (non-runtime, safe for Vite)
-      '@shared': path.resolve(__dirname, '../lib'),
+      '@shared': path.resolve(__dirname, './src/shared'),
     },
   },
   server: { port: 3001, allowedHosts },
