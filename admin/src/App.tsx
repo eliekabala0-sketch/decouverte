@@ -2,7 +2,6 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import { AdminLayout } from './layouts/AdminLayout'
 import { LoginPage } from './pages/LoginPage'
 import { DashboardHome } from './pages/DashboardHome'
-import { UsersPage } from './pages/UsersPage'
 import { ProfilesPage } from './pages/ProfilesPage'
 import { ConversationsPage } from './pages/ConversationsPage'
 import { ConversationDetailPage } from './pages/ConversationDetailPage'
@@ -45,7 +44,7 @@ export default function App() {
             <AdminLayout>
               <Routes>
                 <Route path="/" element={<DashboardHome />} />
-                <Route path="users" element={<UsersPage />} />
+                <Route path="users" element={<ProfilesPage />} />
                 <Route path="users/:userId" element={<UserDetailPage />} />
                 <Route path="profiles" element={<ProfilesPage />} />
                 <Route path="conversations" element={<ConversationsPage />} />
