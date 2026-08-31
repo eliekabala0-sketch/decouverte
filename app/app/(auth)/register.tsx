@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { View, Text, TextInput, Pressable, StyleSheet, KeyboardAvoidingView, Platform, Alert } from 'react-native'
 import { useRouter } from 'expo-router'
 import { useTheme } from '@/theme/ThemeContext'
-import { supabase } from '@/lib/supabase'
+import { apiRegister } from '@/lib/api'
 import { MIN_PASSWORD_LENGTH, MIN_PHONE_DIGITS_SIGNUP } from '../../../lib/constants'
 import { syntheticEmailForSignUp } from '../../../lib/authSyntheticEmail'
 
@@ -53,44 +53,7 @@ export default function RegisterScreen() {
       setProgressText('Connexion au serveur en cours. Vous pouvez patienter, la creation continue.')
     }, 4500)
     try {
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: { data: { phone: phone.replace(/\s/g, '') } },
-      })
-      if (error) {
-        const full = formatSignUpError(error as { message?: string; code?: string; status?: number })
-        setErrorText(full)
-        const msg = (error.message || '').toLowerCase()
-        const code = (error as { code?: string }).code
-        const status = (error as { status?: number }).status
-        if (status === 429 || msg.includes('too many requests')) {
-          Alert.alert(
-            'Inscription bloquée',
-            'Supabase Auth bloque l’envoi e-mail (429 over_email_send_rate_limit). Désactivez "Confirm email" dans Auth > Providers > Email, puis réessayez.'
-          )
-          return
-        }
-        if (code === 'user_already_exists' || msg.includes('already registered')) {
-          Alert.alert('Inscription', 'Ce numéro est déjà utilisé. Connectez-vous ou utilisez un autre numéro.')
-        } else if (code === 'email_provider_disabled' || msg.includes('email signups are disabled')) {
-          Alert.alert(
-            'Inscription',
-            'Les inscriptions par e-mail sont désactivées sur le projet Supabase. Activez le fournisseur Email (Auth → Providers).'
-          )
-        } else if (code === 'invalid_email' || msg.includes('invalid email') || msg.includes('validate email')) {
-          Alert.alert('Inscription', full)
-        } else {
-          Alert.alert('Inscription', full)
-        }
-        return
-      }
-      if (data?.user && !data.session) {
-        Alert.alert(
-          'Inscription',
-          'Compte créé. Si la confirmation e-mail est activée dans Supabase, vérifiez votre boîte ; sinon vous pouvez continuer.'
-        )
-      }
+      await apiRegister(email, phone.replace(/\s/g, ''), password)
       setProgressText('Compte cree. Preparation du profil...')
       router.replace('/(auth)/create-profile')
     } catch (e) {

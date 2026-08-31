@@ -31,6 +31,18 @@ export async function apiLogin(email: string, password: string) {
   return session
 }
 
+export async function apiRegister(email: string, phone: string, password: string) {
+  if (!apiUrl) throw new Error('Le serveur Découverte n’est pas configuré.')
+  const response = await fetch(`${apiUrl}/v1/auth/register`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, phone, password }),
+  })
+  const payload = await response.json()
+  if (!response.ok) throw new Error(payload.error ?? 'invalid_registration')
+  const session = { ...payload, expiresAt: Date.now() + Number(payload.expiresIn ?? 900) * 1000 } as ApiSession
+  await setApiSession(session)
+  return session
+}
+
 export async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = await apiAccessToken()
   const response = await fetch(`${apiUrl}${path}`, {

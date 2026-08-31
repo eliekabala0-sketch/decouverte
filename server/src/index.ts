@@ -6,6 +6,8 @@ import { Server } from 'socket.io'
 import { createAdapter } from '@socket.io/redis-adapter'
 import { createClient } from 'redis'
 import { z } from 'zod'
+import bcrypt from 'bcryptjs'
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { allowedOrigins, config } from './config.js'
 import { db } from './db.js'
 import { createCall, endCall, joinCall } from './calls.js'
@@ -18,6 +20,10 @@ const rateLimit = require('express-rate-limit') as (options: Record<string, unkn
 const helmet = require('helmet') as () => express.RequestHandler
 
 const app = express()
+const s3 = config.S3_ENDPOINT && config.S3_ACCESS_KEY_ID && config.S3_SECRET_ACCESS_KEY ? new S3Client({
+  endpoint: config.S3_ENDPOINT, region: config.S3_REGION ?? 'auto', forcePathStyle: true,
+  credentials: { accessKeyId: config.S3_ACCESS_KEY_ID, secretAccessKey: config.S3_SECRET_ACCESS_KEY },
+}) : null
 app.set('trust proxy', 1)
 app.use(helmet())
 app.use(cors({ origin: (origin, callback) => callback(null, !origin || allowedOrigins.has(origin)), credentials: true }))
@@ -29,7 +35,32 @@ app.get('/health', async (_request, response) => {
   response.json({ ok: true, database: 'mysql', timestamp: new Date().toISOString() })
 })
 
+app.get('/v1/media/:token', async (request, response) => {
+  if (!s3 || !config.S3_BUCKET) return response.status(503).end()
+  try {
+    const key = Buffer.from(request.params.token, 'base64url').toString('utf8')
+    const object = await s3.send(new GetObjectCommand({ Bucket: config.S3_BUCKET, Key: key }))
+    if (object.ContentType) response.type(object.ContentType)
+    response.setHeader('Cache-Control', 'public,max-age=86400')
+    response.send(Buffer.from(await object.Body!.transformToByteArray()))
+  } catch { response.status(404).end() }
+})
+
 const loginSchema = z.object({ email: z.string().email(), password: z.string().min(8).max(200) })
+app.post('/v1/auth/register', rateLimit({ windowMs: 60 * 60_000, limit: 8 }), async (request, response) => {
+  const parsed = loginSchema.extend({ phone: z.string().min(8).max(40) }).safeParse(request.body)
+  if (!parsed.success) return response.status(400).json({ error: 'invalid_registration' })
+  const id = crypto.randomUUID()
+  try {
+    const passwordHash = await bcrypt.hash(parsed.data.password, 12)
+    await db.execute('INSERT INTO users (id,email,phone,password_hash,role,status,created_at,updated_at) VALUES (?,?,?,? ,\'user\',\'active\',CURRENT_TIMESTAMP(3),CURRENT_TIMESTAMP(3))', [id, parsed.data.email.toLowerCase(), parsed.data.phone, passwordHash])
+    const user = { id, email: parsed.data.email.toLowerCase(), role: 'user' }
+    response.status(201).json({ user, accessToken: issueAccessToken(user), refreshToken: issueRefreshToken(user), expiresIn: 900 })
+  } catch (error) {
+    if ((error as { code?: string }).code === 'ER_DUP_ENTRY') return response.status(409).json({ error: 'user_already_exists' })
+    throw error
+  }
+})
 app.post('/v1/auth/login', rateLimit({ windowMs: 15 * 60_000, limit: 10 }), async (request, response) => {
   const parsed = loginSchema.safeParse(request.body)
   if (!parsed.success) return response.status(400).json({ error: 'invalid_credentials' })
@@ -80,6 +111,57 @@ app.get('/v1/me', requireAuth, async (request, response) => {
   ])
   if (!users[0]) return response.status(404).json({ error: 'user_not_found' })
   response.json({ user: users[0], profile: profiles[0] ?? null, profileAccess: access[0] ?? null })
+})
+
+app.put('/v1/me/profile', requireAuth, async (request, response) => {
+  const userId = (request as AuthedRequest).user!.id
+  const parsed = z.object({
+    username: z.string().trim().min(2).max(120), gender: z.string().max(16), age: z.number().int().min(18).max(120),
+    city: z.string().trim().min(1).max(120), commune: z.string().trim().min(1).max(120), bio: z.string().max(5000).nullable().optional(),
+    phone: z.string().max(40).nullable().optional(), mode_libre_active: z.boolean(), mode_serieux_active: z.boolean(),
+  }).safeParse(request.body)
+  if (!parsed.success) return response.status(400).json({ error: 'invalid_profile' })
+  const p = parsed.data
+  await db.execute(`INSERT INTO profiles (id,phone,username,gender,age,city,commune,bio,status,is_verified,country,role,photo,boost_reason,mode_libre_active,mode_serieux_active,admin_test_reasons,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,'active',0,'CD','user',NULL,NULL,?,?,'[]',CURRENT_TIMESTAMP(3),CURRENT_TIMESTAMP(3)) ON DUPLICATE KEY UPDATE phone=VALUES(phone),username=VALUES(username),gender=VALUES(gender),age=VALUES(age),city=VALUES(city),commune=VALUES(commune),bio=VALUES(bio),mode_libre_active=VALUES(mode_libre_active),mode_serieux_active=VALUES(mode_serieux_active),updated_at=CURRENT_TIMESTAMP(3)`, [userId, p.phone ?? null, p.username, p.gender, p.age, p.city, p.commune, p.bio ?? null, p.mode_libre_active, p.mode_serieux_active])
+  const [rows] = await db.query<import('mysql2').RowDataPacket[]>('SELECT * FROM profiles WHERE id=?', [userId])
+  response.json({ profile: rows[0] })
+})
+
+app.put('/v1/me/profile/photo-upload', requireAuth, express.raw({ type: 'image/*', limit: '10mb' }), async (request, response) => {
+  if (!s3 || !config.S3_BUCKET || !Buffer.isBuffer(request.body)) return response.status(503).json({ error: 'media_unavailable' })
+  const userId = (request as AuthedRequest).user!.id
+  const extension = request.headers['content-type'] === 'image/png' ? 'png' : request.headers['content-type'] === 'image/webp' ? 'webp' : 'jpg'
+  const key = `profile-media/${userId}/${Date.now()}-${crypto.randomUUID()}.${extension}`
+  await s3.send(new PutObjectCommand({ Bucket: config.S3_BUCKET, Key: key, Body: request.body, ContentType: request.headers['content-type'] }))
+  response.status(201).json({ url: `${config.PUBLIC_API_URL}/v1/media/${Buffer.from(key).toString('base64url')}` })
+})
+
+app.get('/v1/profiles/:profileId/photos', requireAuth, async (request, response) => {
+  const [rows] = await db.query<import('mysql2').RowDataPacket[]>('SELECT * FROM profile_photos WHERE user_id=? ORDER BY is_primary DESC,sort_order,created_at', [request.params.profileId])
+  response.json({ data: rows })
+})
+
+app.post('/v1/me/profile/photos', requireAuth, async (request, response) => {
+  const userId = (request as AuthedRequest).user!.id
+  const parsed = z.object({ photoUrl: z.string().url(), isPrimary: z.boolean().default(false) }).safeParse(request.body)
+  if (!parsed.success) return response.status(400).json({ error: 'invalid_photo' })
+  const id = crypto.randomUUID()
+  await db.execute('INSERT INTO profile_photos (id,user_id,photo_url,is_primary,sort_order,created_at) VALUES (?,?,?,?,0,CURRENT_TIMESTAMP(3))', [id, userId, parsed.data.photoUrl, parsed.data.isPrimary])
+  response.status(201).json({ id })
+})
+
+app.post('/v1/me/profile/photos/:photoId/primary', requireAuth, async (request, response) => {
+  const userId = (request as AuthedRequest).user!.id
+  const connection = await db.getConnection()
+  try {
+    await connection.beginTransaction()
+    const [rows] = await connection.query<import('mysql2').RowDataPacket[]>('SELECT photo_url FROM profile_photos WHERE id=? AND user_id=?', [request.params.photoId, userId])
+    if (!rows[0]) { await connection.rollback(); return response.status(404).json({ error: 'photo_not_found' }) }
+    await connection.execute('UPDATE profile_photos SET is_primary=0 WHERE user_id=?', [userId])
+    await connection.execute('UPDATE profile_photos SET is_primary=1 WHERE id=? AND user_id=?', [request.params.photoId, userId])
+    await connection.execute('UPDATE profiles SET photo=? WHERE id=?', [rows[0].photo_url, userId])
+    await connection.commit(); response.json({ ok: true })
+  } catch (error) { await connection.rollback(); throw error } finally { connection.release() }
 })
 
 app.get('/v1/settings', requireAuth, async (_request, response) => {

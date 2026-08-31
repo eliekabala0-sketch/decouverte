@@ -4,7 +4,7 @@ import { Redirect, useRouter } from 'expo-router'
 import type { ApiUser } from '@/lib/session'
 import { useTheme } from '@/theme/ThemeContext'
 import { useAuth } from '@/contexts/AuthContext'
-import { supabase } from '@/lib/supabase'
+import { apiRequest } from '@/lib/api'
 import { GENDER_LABELS, COMMUNES_KINSHASA } from '../../../lib/constants'
 import type { Gender } from '../../../lib/types'
 
@@ -156,16 +156,10 @@ export default function CreateProfileScreen() {
         mode_serieux_active: modeSerieux,
       }
       dbg(`Colonnes: ${Object.keys(payloadWithModes).join(', ')}`)
-      const insertPromise = (async () => {
-        const first = await supabase.from('profiles').insert(payloadWithModes).select('id').single()
-        if (!first.error) return first
-        const msg = (first.error.message || '').toLowerCase()
-        const missingModeCols = msg.includes('mode_libre_active') || msg.includes('mode_serieux_active')
-        if (missingModeCols && msg.includes('could not find')) {
-          return await supabase.from('profiles').insert(payloadBase).select('id').single()
-        }
-        return first
-      })()
+      const insertPromise = apiRequest<{ profile: typeof payloadWithModes }>('/v1/me/profile', {
+        method: 'PUT',
+        body: JSON.stringify(payloadWithModes),
+      })
       const timeoutMs = 12000
       const res = await Promise.race([
         insertPromise,
@@ -174,10 +168,6 @@ export default function CreateProfileScreen() {
 
       if (res === null) {
         setErrorText('La création du profil est bloquée (lock Supabase). Fermez les autres onglets Découverte puis réessayez.')
-        return
-      }
-      if (res.error) {
-        setErrorText(res.error.message || 'Erreur lors de la création du profil.')
         return
       }
       primeProfile(payloadWithModes)

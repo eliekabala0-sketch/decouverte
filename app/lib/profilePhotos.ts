@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase'
+import { apiAccessToken, apiBaseUrl, apiRequest } from '@/lib/api'
 
 const PROFILE_MEDIA_BUCKET = 'profile-media'
 
@@ -23,6 +24,14 @@ export async function uploadProfilePhoto(userId: string, uri: string, mimeType?:
   const ext = contentType.includes('png') ? 'png' : contentType.includes('webp') ? 'webp' : 'jpg'
   const path = `${userId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
 
+  if (apiBaseUrl) {
+    const token = await apiAccessToken()
+    const response = await fetch(`${apiBaseUrl}/v1/me/profile/photo-upload`, { method: 'PUT', headers: { Authorization: `Bearer ${token}`, 'Content-Type': contentType }, body: blob })
+    const payload = await response.json()
+    if (!response.ok) throw new Error(payload.error ?? 'Upload photo échoué.')
+    return payload.url
+  }
+
   const { error: upErr } = await supabase.storage.from(PROFILE_MEDIA_BUCKET).upload(path, blob, {
     upsert: false,
     contentType,
@@ -35,6 +44,7 @@ export async function uploadProfilePhoto(userId: string, uri: string, mimeType?:
 }
 
 export async function listProfilePhotos(userId: string): Promise<ProfilePhotoRow[]> {
+  if (apiBaseUrl) return (await apiRequest<{ data: ProfilePhotoRow[] }>(`/v1/profiles/${userId}/photos`)).data
   const { data, error } = await supabase
     .from('profile_photos')
     .select('*')
@@ -47,6 +57,7 @@ export async function listProfilePhotos(userId: string): Promise<ProfilePhotoRow
 }
 
 export async function insertProfilePhoto(userId: string, photoUrl: string, isPrimary = false): Promise<string> {
+  if (apiBaseUrl) return (await apiRequest<{ id: string }>('/v1/me/profile/photos', { method: 'POST', body: JSON.stringify({ photoUrl, isPrimary }) })).id
   const { data, error } = await supabase
     .from('profile_photos')
     .insert({
@@ -62,6 +73,7 @@ export async function insertProfilePhoto(userId: string, photoUrl: string, isPri
 }
 
 export async function setPrimaryPhoto(userId: string, photoId: string, photoUrl: string): Promise<void> {
+  if (apiBaseUrl) { await apiRequest(`/v1/me/profile/photos/${photoId}/primary`, { method: 'POST' }); return }
   const { error: resetErr } = await supabase
     .from('profile_photos')
     .update({ is_primary: false })
