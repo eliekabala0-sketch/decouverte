@@ -16,6 +16,11 @@ import { useAuth } from '@/contexts/AuthContext'
 import { supabase } from '@/lib/supabase'
 import { markConversationRead } from '@/lib/conversationRpc'
 import type { Message } from '../../../../lib/types'
+import { Ionicons } from '@expo/vector-icons'
+import {
+  getApiConversation, getApiMessages, markApiConversationRead, mysqlApiEnabled,
+  sendApiMessage, subscribeApiConversation,
+} from '@/lib/conversationsApi'
 
 export default function ConversationScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
@@ -34,7 +39,8 @@ export default function ConversationScreen() {
   const markConversationAsRead = useCallback(async () => {
     if (!id || !user?.id) return
     try {
-      await markConversationRead(id)
+      if (mysqlApiEnabled) await markApiConversationRead(id)
+      else await markConversationRead(id)
     } catch (e) {
       console.warn('[conversation] mark read failed', e instanceof Error ? e.message : e)
     }
@@ -46,6 +52,20 @@ export default function ConversationScreen() {
       return
     }
     const load = async () => {
+      if (mysqlApiEnabled) {
+        try {
+          const [conversation, messageResult] = await Promise.all([getApiConversation(id), getApiMessages(id)])
+          setOtherName(conversation.data.other_display_name)
+          setMessages(messageResult.data)
+          await markConversationAsRead()
+        } catch (reason) {
+          setAccessDenied(true)
+          setSendError(reason instanceof Error ? reason.message : 'Conversation indisponible')
+        } finally {
+          setLoading(false)
+        }
+        return
+      }
       const { data: conv } = await supabase.from('conversations').select('participant_ids').eq('id', id).single()
       if (conv && Array.isArray((conv as { participant_ids: string[] }).participant_ids)) {
         const ids = (conv as { participant_ids: string[] }).participant_ids
@@ -75,6 +95,16 @@ export default function ConversationScreen() {
     }
     void load()
 
+    if (mysqlApiEnabled) {
+      let disposed = false
+      let socket: Awaited<ReturnType<typeof subscribeApiConversation>> | null = null
+      void subscribeApiConversation(id, (next) => {
+        setMessages((prev) => prev.some((message) => message.id === next.id) ? prev : [...prev, next])
+        void markConversationAsRead()
+      }).then((value) => { if (disposed) value.disconnect(); else socket = value }).catch(() => {})
+      return () => { disposed = true; socket?.disconnect() }
+    }
+
     const channel = supabase
       .channel(`messages:${id}`)
       .on(
@@ -102,6 +132,13 @@ export default function ConversationScreen() {
     setSendError(null)
     setInput('')
     try {
+      if (mysqlApiEnabled) {
+        const result = await sendApiMessage(id, text)
+        const next = result.data
+        setMessages((prev) => prev.some((message) => message.id === next.id) ? prev : [...prev, next])
+        flatListRef.current?.scrollToEnd({ animated: true })
+        return
+      }
       const { data: msg, error } = await supabase
         .from('messages')
         .insert({
@@ -160,6 +197,16 @@ export default function ConversationScreen() {
           <Text style={[styles.backText, { color: colors.primary }]}>Retour</Text>
         </Pressable>
         <Text style={[styles.headerTitle, { color: colors.text }]}>{otherName}</Text>
+        {mysqlApiEnabled ? (
+          <>
+            <Pressable accessibilityLabel="Appel audio" onPress={() => router.push({ pathname: '/(app)/call/[id]' as never, params: { id, kind: 'audio' } })} style={styles.callButton}>
+              <Ionicons name="call-outline" size={22} color={colors.primary} />
+            </Pressable>
+            <Pressable accessibilityLabel="Appel vidéo" onPress={() => router.push({ pathname: '/(app)/call/[id]' as never, params: { id, kind: 'video' } })} style={styles.callButton}>
+              <Ionicons name="videocam-outline" size={24} color={colors.primary} />
+            </Pressable>
+          </>
+        ) : null}
       </View>
       <FlatList
         ref={flatListRef}
@@ -229,6 +276,7 @@ const styles = StyleSheet.create({
   backBtn: { marginRight: 12 },
   backText: { fontSize: 16, fontWeight: '600' },
   headerTitle: { fontSize: 18, fontWeight: '700', flex: 1 },
+  callButton: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', marginLeft: 4 },
   messagesList: { padding: 16, paddingBottom: 24 },
   bubbleWrap: { marginBottom: 12 },
   bubbleMe: { alignItems: 'flex-end' },

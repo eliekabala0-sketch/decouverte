@@ -5,6 +5,11 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { ThemeProvider } from '@/theme/ThemeContext'
 import { AuthProvider } from '@/contexts/AuthContext'
+if (Platform.OS !== 'web') {
+  // Chargement conditionnel indispensable : le module WebRTC natif ne peut pas
+  // être évalué par le rendu statique de la PWA.
+  require('@livekit/react-native').registerGlobals()
+}
 
 const rootStyle: ViewStyle = {
   flex: 1,

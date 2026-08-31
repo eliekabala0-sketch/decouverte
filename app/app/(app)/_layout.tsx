@@ -6,6 +6,7 @@ import { useNotificationCounters } from '@/lib/useNotificationCounters'
 import { Ionicons } from '@expo/vector-icons'
 import { Platform, Pressable, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { useIncomingCalls } from '@/lib/useIncomingCalls'
 
 export default function AppLayout() {
   const { colors } = useTheme()
@@ -13,6 +14,7 @@ export default function AppLayout() {
   const { user, profile, loading, signOut } = useAuth()
   const { isOn } = useAppFeatureFlags()
   const { unreadMessages, newPublications } = useNotificationCounters()
+  useIncomingCalls()
 
   if (!loading && !user) return <Redirect href="/(auth)/welcome" />
   if (!loading && user && !profile) return <Redirect href="/(auth)/create-profile" />
@@ -113,6 +115,7 @@ export default function AppLayout() {
         name="conversation/[id]"
         options={{ href: null }}
       />
+      <Tabs.Screen name="call/[id]" options={{ href: null }} />
       <Tabs.Screen
         name="announcements"
         options={{ href: null }}

@@ -6,6 +6,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { supabase } from '@/lib/supabase'
 import type { Conversation } from '../../../lib/types'
 import { remainingContacts } from '../../../lib/access'
+import { listApiConversations, mysqlApiEnabled } from '@/lib/conversationsApi'
 
 type ConversationWithOther = Conversation & {
   otherUserId: string
@@ -32,6 +33,20 @@ export default function MessagesScreen() {
     }
     setLoadError(null)
     try {
+      if (mysqlApiEnabled) {
+        const result = await listApiConversations()
+        setConversations(result.data.map((item) => ({
+          id: item.id,
+          participant_ids: [user.id, item.other_user_id],
+          created_at: item.created_at,
+          last_message_at: item.last_message_at,
+          otherUserId: item.other_user_id,
+          otherDisplayName: item.other_display_name,
+          lastContent: item.last_content,
+          unreadCount: Number(item.unread_count),
+        })))
+        return
+      }
       const { data: convData, error: convError } = await supabase
         .from('conversations')
         .select('*')
@@ -92,6 +107,10 @@ export default function MessagesScreen() {
   useEffect(() => {
     void loadConversations()
     if (!user?.id) return
+    if (mysqlApiEnabled) {
+      const timer = setInterval(() => void loadConversations(), 15_000)
+      return () => clearInterval(timer)
+    }
     const channel = supabase
       .channel(`messages-list:${user.id}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => {
