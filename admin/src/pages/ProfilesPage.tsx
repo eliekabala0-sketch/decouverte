@@ -1,24 +1,20 @@
 import { useCallback, useEffect, useState } from 'react'
-import { supabase } from '@lib/supabase'
-import type { Profile } from '@shared/types'
+import { adminRequest } from '@lib/api'
 import { GENDER_LABELS } from '@shared/constants'
 import { PageHeader } from '../components/PageHeader'
 import './DashboardPage.css'
 
 const PAGE_SIZE = 150
+type ManagedUser = { id: string; email: string; phone?: string | null; role: string; status: string; created_at: string; username?: string | null; gender?: string | null; city?: string | null; commune?: string | null }
 
 export function ProfilesPage() {
-  const [profiles, setProfiles] = useState<Profile[]>([])
+  const [profiles, setProfiles] = useState<ManagedUser[]>([])
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState<string | null>(null)
 
   const load = useCallback(async () => {
-    const { data } = await supabase
-      .from('profiles')
-      .select('id,username,gender,city,commune,status,created_at')
-      .order('created_at', { ascending: false })
-      .limit(PAGE_SIZE)
-    setProfiles((data ?? []) as Profile[])
+    const { data } = await adminRequest<{ data: ManagedUser[] }>(`/v1/admin/users?limit=${PAGE_SIZE}`)
+    setProfiles(data)
     setLoading(false)
   }, [])
 
@@ -31,13 +27,10 @@ export function ProfilesPage() {
       status === 'active'
         ? 'Restauration admin'
         : window.prompt(`Raison de la ${status === 'banned' ? 'bannissement' : 'suspension'} ?`, 'Moderation admin') ?? 'Moderation admin'
-    const { error } = await supabase.rpc('set_profile_moderation_status', {
-      p_profile_id: id,
-      p_status: status,
-      p_reason: reason,
-    })
-    if (error) {
-      setMessage(error.message || 'Action moderation impossible.')
+    try {
+      await adminRequest(`/v1/admin/users/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status, reason }) })
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Action moderation impossible.')
       return
     }
     setProfiles((prev) => prev.map((p) => (p.id === id ? { ...p, status } : p)))
@@ -49,14 +42,15 @@ export function ProfilesPage() {
   return (
     <div>
       <PageHeader onRefresh={load} />
-      <h1 className="page-title">Profils</h1>
-      <p className="page-subtitle">Voir, modifier, suspendre, bannir ou restaurer les profils.</p>
+      <h1 className="page-title">Comptes et profils</h1>
+      <p className="page-subtitle">Tous les comptes MySQL, y compris les administrateurs et les comptes sans profil.</p>
       {message ? <div className="dashboard-message dashboard-message-success">{message}</div> : null}
       <div className="table-wrap">
         <table className="data-table">
           <thead>
             <tr>
-              <th>Pseudo</th>
+              <th>Compte</th>
+              <th>Rôle</th>
               <th>Sexe</th>
               <th>Ville / Commune</th>
               <th>Statut</th>
@@ -65,13 +59,14 @@ export function ProfilesPage() {
           </thead>
           <tbody>
             {profiles.length === 0 && (
-              <tr><td colSpan={5}>Aucun profil.</td></tr>
+              <tr><td colSpan={6}>Aucun compte.</td></tr>
             )}
             {profiles.map((p) => (
               <tr key={p.id}>
-                <td>{p.username}</td>
-                <td>{GENDER_LABELS[p.gender] ?? p.gender}</td>
-                <td>{p.city}, {p.commune}</td>
+                <td>{p.username || p.email}<br /><small>{p.username ? p.email : 'Profil non créé'}</small></td>
+                <td>{p.role}</td>
+                <td>{p.gender ? (GENDER_LABELS[p.gender] ?? p.gender) : '—'}</td>
+                <td>{p.city ? `${p.city}${p.commune ? `, ${p.commune}` : ''}` : '—'}</td>
                 <td>{p.status}</td>
                 <td>
                   {p.status === 'active' && (

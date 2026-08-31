@@ -11,7 +11,7 @@ import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } fro
 import { allowedOrigins, config } from './config.js'
 import { db } from './db.js'
 import { createCall, endCall, joinCall } from './calls.js'
-import { issueAccessToken, issueRefreshToken, refreshSession, requireAuth, verifyAccessToken, verifyCredentials, type AuthedRequest } from './auth.js'
+import { issueAccessToken, issueRefreshToken, refreshSession, requireAdmin, requireAuth, verifyAccessToken, verifyCredentials, type AuthedRequest } from './auth.js'
 import { appEvents } from './events.js'
 import { getConversation, listConversations, listMessages, markRead, sendMessage } from './conversations.js'
 
@@ -230,6 +230,32 @@ app.post('/v1/reports', requireAuth, async (request, response) => {
   if (!parsed.success) return response.status(400).json({ error: 'invalid_report' })
   await db.execute('INSERT INTO reports (id,reporter_id,reported_id,type,reason,status,created_at) VALUES (?,?,?,?,?,\'pending\',CURRENT_TIMESTAMP(3))', [crypto.randomUUID(), userId, parsed.data.reportedId, parsed.data.type, parsed.data.reason])
   response.status(201).json({ ok: true })
+})
+
+app.get('/v1/admin/me', requireAdmin, async (request, response) => {
+  const userId = (request as AuthedRequest).user!.id
+  const [rows] = await db.query<import('mysql2').RowDataPacket[]>('SELECT u.id,u.email,u.role,u.status,p.username,p.is_admin FROM users u LEFT JOIN profiles p ON p.id=u.id WHERE u.id=?', [userId])
+  response.json({ user: rows[0] })
+})
+
+app.get('/v1/admin/users', requireAdmin, async (request, response) => {
+  const limit = Math.min(500, Math.max(1, Number(request.query.limit ?? 150)))
+  const [rows] = await db.query<import('mysql2').RowDataPacket[]>(`SELECT u.id,u.email,u.phone,u.role,u.status,u.created_at,p.username,p.gender,p.city,p.commune,p.is_admin FROM users u LEFT JOIN profiles p ON p.id=u.id ORDER BY FIELD(u.role,'super_admin','admin','user'),u.created_at DESC LIMIT ?`, [limit])
+  response.json({ data: rows })
+})
+
+app.patch('/v1/admin/users/:userId/status', requireAdmin, async (request, response) => {
+  const parsed = z.object({ status: z.enum(['active', 'suspended', 'banned']), reason: z.string().max(2000).optional() }).safeParse(request.body)
+  if (!parsed.success) return response.status(400).json({ error: 'invalid_status' })
+  const actorId = (request as AuthedRequest).user!.id
+  const connection = await db.getConnection()
+  try {
+    await connection.beginTransaction()
+    await connection.execute('UPDATE users SET status=? WHERE id=?', [parsed.data.status, request.params.userId])
+    await connection.execute('UPDATE profiles SET status=? WHERE id=?', [parsed.data.status, request.params.userId])
+    await connection.execute('INSERT INTO audit_events (id,actor_id,target_user_id,action,entity_type,entity_id,reason,metadata,created_at) VALUES (?,?,?,?,?,?,?,\'{}\',CURRENT_TIMESTAMP(3))', [crypto.randomUUID(), actorId, request.params.userId, `profile_${parsed.data.status}`, 'profile', request.params.userId, parsed.data.reason ?? null])
+    await connection.commit(); response.json({ ok: true })
+  } catch (error) { await connection.rollback(); throw error } finally { connection.release() }
 })
 
 app.get('/v1/notifications/counts', requireAuth, async (request, response) => {
