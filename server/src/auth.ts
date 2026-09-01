@@ -16,10 +16,12 @@ type UserRow = RowDataPacket & {
   status: string
 }
 
-export async function verifyCredentials(email: string, password: string) {
+export async function verifyCredentials(identifier: string, password: string) {
+  const normalized = identifier.trim().toLowerCase()
+  const phoneDigits = identifier.replace(/\D/g, '')
   const user = await one<UserRow>(
-    'SELECT id, email, password_hash, role, status FROM users WHERE email = ? LIMIT 1',
-    [email.toLowerCase()],
+    "SELECT id,email,password_hash,role,status FROM users WHERE email=? OR REPLACE(REPLACE(REPLACE(COALESCE(phone,''),'+',''),' ',''),'-','')=? LIMIT 1",
+    [normalized, phoneDigits],
   )
   if (!user || user.status !== 'active' || !(await bcrypt.compare(password, user.password_hash))) return null
   return { id: user.id, email: user.email, role: user.role } satisfies AuthUser

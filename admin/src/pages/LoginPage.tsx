@@ -35,12 +35,12 @@ export function LoginPage() {
         <p className="login-subtitle">Connexion au tableau de bord</p>
         <form onSubmit={handleSubmit} className="login-form">
           <label>
-            Email
+            Email ou téléphone
             <input
-              type="email"
+              type="text"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="admin@decouverte.cd"
+              placeholder="+243... ou admin@decouverte.cd"
               required
             />
           </label>

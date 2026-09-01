@@ -46,7 +46,7 @@ app.get('/v1/media/:token', async (request, response) => {
   } catch { response.status(404).end() }
 })
 
-const loginSchema = z.object({ email: z.string().email(), password: z.string().min(8).max(200) })
+const loginSchema = z.object({ email: z.string().min(3).max(320), password: z.string().min(8).max(200) })
 app.post('/v1/auth/register', rateLimit({ windowMs: 60 * 60_000, limit: 8 }), async (request, response) => {
   const parsed = loginSchema.extend({ phone: z.string().min(8).max(40) }).safeParse(request.body)
   if (!parsed.success) return response.status(400).json({ error: 'invalid_registration' })
@@ -256,6 +256,17 @@ app.patch('/v1/admin/users/:userId/status', requireAdmin, async (request, respon
     await connection.execute('INSERT INTO audit_events (id,actor_id,target_user_id,action,entity_type,entity_id,reason,metadata,created_at) VALUES (?,?,?,?,?,?,?,\'{}\',CURRENT_TIMESTAMP(3))', [crypto.randomUUID(), actorId, request.params.userId, `profile_${parsed.data.status}`, 'profile', request.params.userId, parsed.data.reason ?? null])
     await connection.commit(); response.json({ ok: true })
   } catch (error) { await connection.rollback(); throw error } finally { connection.release() }
+})
+
+app.patch('/v1/admin/users/:userId/password', requireAdmin, async (request, response) => {
+  const parsed = z.object({ password: z.string().min(10).max(200) }).safeParse(request.body)
+  if (!parsed.success) return response.status(400).json({ error: 'invalid_password' })
+  const actorId = (request as AuthedRequest).user!.id
+  const hash = await bcrypt.hash(parsed.data.password, 12)
+  const [result] = await db.execute<import('mysql2').ResultSetHeader>('UPDATE users SET password_hash=?,updated_at=CURRENT_TIMESTAMP(3) WHERE id=?', [hash, request.params.userId])
+  if (!result.affectedRows) return response.status(404).json({ error: 'user_not_found' })
+  await db.execute('INSERT INTO audit_events (id,actor_id,target_user_id,action,entity_type,entity_id,reason,metadata,created_at) VALUES (?,?,?,?,?,?,?,\'{}\',CURRENT_TIMESTAMP(3))', [crypto.randomUUID(), actorId, request.params.userId, 'password_reset', 'user', request.params.userId, 'Réinitialisation administrateur'])
+  response.json({ ok: true })
 })
 
 app.get('/v1/notifications/counts', requireAuth, async (request, response) => {

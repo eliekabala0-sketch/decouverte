@@ -37,6 +37,18 @@ export function ProfilesPage() {
     setMessage('Statut mis a jour et historise.')
   }
 
+  const resetPassword = async (id: string) => {
+    const password = window.prompt('Nouveau mot de passe (10 caractères minimum) :')
+    if (!password) return
+    if (password.length < 10) { setMessage('Le mot de passe doit contenir au moins 10 caractères.'); return }
+    try {
+      await adminRequest(`/v1/admin/users/${id}/password`, { method: 'PATCH', body: JSON.stringify({ password }) })
+      setMessage('Mot de passe réinitialisé et action historisée.')
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Réinitialisation impossible.')
+    }
+  }
+
   if (loading) return <div className="page-loading">Chargement...</div>
 
   return (
@@ -69,9 +81,10 @@ export function ProfilesPage() {
                 <td>{p.city ? `${p.city}${p.commune ? `, ${p.commune}` : ''}` : '—'}</td>
                 <td>{p.status}</td>
                 <td>
+                  <button type="button" className="secondary" onClick={() => resetPassword(p.id)}>Mot de passe</button>
                   {p.status === 'active' && (
                     <>
-                      <button type="button" className="secondary" onClick={() => updateStatus(p.id, 'suspended')}>Suspendre</button>
+                      <button type="button" className="secondary" style={{ marginLeft: 8 }} onClick={() => updateStatus(p.id, 'suspended')}>Suspendre</button>
                       <button type="button" className="secondary" style={{ marginLeft: 8 }} onClick={() => updateStatus(p.id, 'banned')}>Bannir</button>
                     </>
                   )}
