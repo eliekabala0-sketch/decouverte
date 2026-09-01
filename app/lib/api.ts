@@ -41,7 +41,13 @@ export async function apiRegister(email: string, phone: string, password: string
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, phone, password }),
   })
   const payload = await response.json()
-  if (!response.ok) throw new Error(payload.error ?? 'invalid_registration')
+  if (!response.ok) {
+    const messages: Record<string, string> = {
+      invalid_registration: 'Vérifiez le numéro et utilisez un mot de passe d’au moins 8 caractères.',
+      user_already_exists: 'Ce numéro possède déjà un compte. Essayez de vous connecter.',
+    }
+    throw new Error(messages[payload.error] ?? payload.error ?? 'Inscription impossible.')
+  }
   const session = { ...payload, expiresAt: Date.now() + Number(payload.expiresIn ?? 900) * 1000 } as ApiSession
   await setApiSession(session)
   return session

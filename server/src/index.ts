@@ -46,8 +46,12 @@ app.get('/v1/media/:token', async (request, response) => {
   } catch { response.status(404).end() }
 })
 
-const loginSchema = z.object({ email: z.string().min(3).max(320), password: z.string().min(8).max(200) })
-app.post('/v1/auth/register', rateLimit({ windowMs: 60 * 60_000, limit: 8 }), async (request, response) => {
+// Les versions déjà installées de l'application acceptent historiquement 6 caractères.
+// Garder cette compatibilité côté API évite de bloquer inscription et connexion pendant le cutover.
+const loginSchema = z.object({ email: z.string().min(3).max(320), password: z.string().min(6).max(200) })
+// Le limiteur global (180/minute/IP) protège déjà l'API. Une limite de 8 inscriptions/heure/IP
+// bloquait des centaines d'utilisateurs derrière la même passerelle mobile (CGNAT).
+app.post('/v1/auth/register', rateLimit({ windowMs: 60 * 60_000, limit: 5_000 }), async (request, response) => {
   const parsed = loginSchema.extend({ phone: z.string().min(8).max(40) }).safeParse(request.body)
   if (!parsed.success) return response.status(400).json({ error: 'invalid_registration' })
   const id = crypto.randomUUID()
