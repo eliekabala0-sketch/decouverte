@@ -275,7 +275,7 @@ app.patch('/v1/admin/users/:userId/status', requireAdmin, async (request, respon
   } catch (error) { await connection.rollback(); throw error } finally { connection.release() }
 })
 
-app.patch('/v1/admin/users/:userId/password', requireAdmin, async (request, response) => {
+app.patch('/v1/admin/users/:userId/password', requireSuperAdmin, async (request, response) => {
   const parsed = z.object({ password: z.string().min(10).max(200) }).safeParse(request.body)
   if (!parsed.success) return response.status(400).json({ error: 'invalid_password' })
   const actorId = (request as AuthedRequest).user!.id
