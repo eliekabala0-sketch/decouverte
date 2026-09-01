@@ -19,6 +19,7 @@ export default function RegisterScreen() {
   const [phone, setPhone] = useState('+243')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
+  const [showPasswords, setShowPasswords] = useState(false)
   const [loading, setLoading] = useState(false)
   const [errorText, setErrorText] = useState('')
   const [progressText, setProgressText] = useState('')
@@ -87,21 +88,26 @@ export default function RegisterScreen() {
           keyboardType="phone-pad"
           autoCapitalize="none"
         />
-        <TextInput
-          style={[styles.input, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
-          placeholder={`Mot de passe (min. ${MIN_PASSWORD_LENGTH} caractères)`}
-          placeholderTextColor={colors.textMuted}
-          value={password}
-          onChangeText={setPassword}
-          secureTextEntry
-        />
+        <View style={[styles.passwordRow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <TextInput
+            style={[styles.passwordInput, { color: colors.text }]}
+            placeholder={`Mot de passe (min. ${MIN_PASSWORD_LENGTH} caractères)`}
+            placeholderTextColor={colors.textMuted}
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry={!showPasswords}
+          />
+          <Pressable accessibilityRole="button" accessibilityLabel={showPasswords ? 'Masquer les mots de passe' : 'Afficher les mots de passe'} onPress={() => setShowPasswords((value) => !value)} style={styles.passwordToggle}>
+            <Text style={{ color: colors.primary, fontWeight: '600' }}>{showPasswords ? 'Masquer' : 'Afficher'}</Text>
+          </Pressable>
+        </View>
         <TextInput
           style={[styles.input, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
           placeholder="Confirmer le mot de passe"
           placeholderTextColor={colors.textMuted}
           value={confirmPassword}
           onChangeText={setConfirmPassword}
-          secureTextEntry
+          secureTextEntry={!showPasswords}
         />
         <Pressable
           onPress={handleRegister}
@@ -137,6 +143,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     fontSize: 16,
   },
+  passwordRow: { height: 56, borderRadius: 14, borderWidth: 1, flexDirection: 'row', alignItems: 'center' },
+  passwordInput: { flex: 1, height: '100%', paddingHorizontal: 18, fontSize: 16 },
+  passwordToggle: { height: '100%', justifyContent: 'center', paddingHorizontal: 16 },
   btn: {
     height: 56,
     borderRadius: 14,

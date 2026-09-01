@@ -61,3 +61,14 @@
 .dashboard-message-error { background: rgba(239,68,68,0.1); border: 1px solid var(--error, #ef4444); color: var(--error, #dc2626); }
 .dashboard-message-dismiss { background: none; border: none; font-size: 1.25rem; cursor: pointer; opacity: 0.8; line-height: 1; padding: 0 4px; }
 .dashboard-message-dismiss:hover { opacity: 1; }
+.accounts-filters { margin-bottom: 20px; }
+.filters-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+.bulk-reset-panel { margin: 20px 0; border-color: var(--warning); }
+.bulk-reset-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 16px; }
+.bulk-reset-controls input[type="password"], .bulk-reset-controls input[type="text"] { flex: 1 1 280px; }
+.bulk-reset-controls label { display: flex; align-items: center; gap: 8px; }
+.bulk-reset-controls label input { width: auto; }
+.data-table td:last-child { white-space: nowrap; }
+.data-table td:last-child button { margin: 2px 4px 2px 0; }
+.pagination { display: flex; align-items: center; justify-content: center; gap: 16px; margin: 20px 0; }
+@media (max-width: 640px) { .filters-grid { grid-template-columns: 1fr; } .bulk-reset-controls { align-items: stretch; flex-direction: column; } .bulk-reset-controls > * { width: 100%; } }

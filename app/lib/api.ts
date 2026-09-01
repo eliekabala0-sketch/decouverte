@@ -2,7 +2,11 @@ import Constants from 'expo-constants'
 import { getApiSession, setApiSession, type ApiSession } from '@/lib/session'
 
 const extra = Constants.expoConfig?.extra ?? {}
-const apiUrl = String(process.env.EXPO_PUBLIC_API_URL ?? extra.EXPO_PUBLIC_API_URL ?? '').replace(/\/$/, '')
+const apiUrl = String(
+  process.env.EXPO_PUBLIC_API_URL ??
+  extra.EXPO_PUBLIC_API_URL ??
+  'https://decouverte-api-production.up.railway.app',
+).replace(/\/$/, '')
 export const apiBaseUrl = apiUrl
 export async function apiAccessToken() {
   if (!apiUrl) throw new Error('Le nouveau serveur Découverte n’est pas encore configuré.')

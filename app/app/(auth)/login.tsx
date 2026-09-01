@@ -17,6 +17,7 @@ export default function LoginScreen() {
   const { colors, spacing } = useTheme()
   const [phone, setPhone] = useState('+243')
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [errorText, setErrorText] = useState('')
 
@@ -86,14 +87,19 @@ export default function LoginScreen() {
           keyboardType="phone-pad"
           autoCapitalize="none"
         />
-        <TextInput
-          style={[styles.input, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
-          placeholder="Mot de passe"
-          placeholderTextColor={colors.textMuted}
-          value={password}
-          onChangeText={setPassword}
-          secureTextEntry
-        />
+        <View style={[styles.passwordRow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <TextInput
+            style={[styles.passwordInput, { color: colors.text }]}
+            placeholder="Mot de passe"
+            placeholderTextColor={colors.textMuted}
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry={!showPassword}
+          />
+          <Pressable accessibilityRole="button" accessibilityLabel={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'} onPress={() => setShowPassword((value) => !value)} style={styles.passwordToggle}>
+            <Text style={{ color: colors.primary, fontWeight: '600' }}>{showPassword ? 'Masquer' : 'Afficher'}</Text>
+          </Pressable>
+        </View>
         <Pressable
           onPress={handleLogin}
           disabled={loading}
@@ -123,6 +129,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     fontSize: 16,
   },
+  passwordRow: { height: 56, borderRadius: 14, borderWidth: 1, flexDirection: 'row', alignItems: 'center' },
+  passwordInput: { flex: 1, height: '100%', paddingHorizontal: 18, fontSize: 16 },
+  passwordToggle: { height: '100%', justifyContent: 'center', paddingHorizontal: 16 },
   btn: {
     height: 56,
     borderRadius: 14,

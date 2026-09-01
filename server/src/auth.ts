@@ -78,6 +78,13 @@ export function requireAdmin(request: AuthedRequest, response: Response, next: N
   })
 }
 
+export function requireSuperAdmin(request: AuthedRequest, response: Response, next: NextFunction) {
+  requireAuth(request, response, () => {
+    if (request.user?.role !== 'super_admin') return response.status(403).json({ error: 'super_admin_required' })
+    next()
+  })
+}
+
 export function verifyAccessToken(token: string): AuthUser {
   const payload = jwt.verify(token, config.JWT_SECRET, {
     issuer: config.JWT_ISSUER,

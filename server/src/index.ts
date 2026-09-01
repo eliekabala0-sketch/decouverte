@@ -11,7 +11,7 @@ import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } fro
 import { allowedOrigins, config } from './config.js'
 import { db } from './db.js'
 import { createCall, endCall, joinCall } from './calls.js'
-import { issueAccessToken, issueRefreshToken, refreshSession, requireAdmin, requireAuth, verifyAccessToken, verifyCredentials, type AuthedRequest } from './auth.js'
+import { issueAccessToken, issueRefreshToken, refreshSession, requireAdmin, requireAuth, requireSuperAdmin, verifyAccessToken, verifyCredentials, type AuthedRequest } from './auth.js'
 import { appEvents } from './events.js'
 import { getConversation, listConversations, listMessages, markRead, sendMessage } from './conversations.js'
 
@@ -240,8 +240,25 @@ app.get('/v1/admin/me', requireAdmin, async (request, response) => {
 
 app.get('/v1/admin/users', requireAdmin, async (request, response) => {
   const limit = Math.min(500, Math.max(1, Number(request.query.limit ?? 150)))
-  const [rows] = await db.query<import('mysql2').RowDataPacket[]>(`SELECT u.id,u.email,u.phone,u.role,u.status,u.created_at,p.username,p.gender,p.city,p.commune,p.is_admin FROM users u LEFT JOIN profiles p ON p.id=u.id ORDER BY FIELD(u.role,'super_admin','admin','user'),u.created_at DESC LIMIT ?`, [limit])
-  response.json({ data: rows })
+  const page = Math.max(0, Number(request.query.page ?? 0))
+  const clauses: string[] = ['1=1']
+  const params: unknown[] = []
+  const q = String(request.query.q ?? '').trim()
+  if (q) { clauses.push('(u.email LIKE ? OR u.phone LIKE ? OR p.username LIKE ?)'); params.push(`%${q}%`, `%${q}%`, `%${q}%`) }
+  for (const [key, column] of [['gender', 'p.gender'], ['status', 'u.status'], ['role', 'u.role'], ['city', 'p.city']] as const) {
+    const value = String(request.query[key] ?? '').trim()
+    if (value) { clauses.push(`${column}=?`); params.push(value) }
+  }
+  const subscription = String(request.query.subscription ?? '')
+  const activeSubscription = `EXISTS(SELECT 1 FROM user_subscriptions s WHERE s.user_id=u.id AND s.status='active' AND (s.ends_at IS NULL OR s.ends_at>CURRENT_TIMESTAMP(3)))`
+  if (subscription === 'active') clauses.push(activeSubscription)
+  if (subscription === 'inactive') clauses.push(`NOT ${activeSubscription}`)
+  const where = clauses.join(' AND ')
+  const [[count], [rows]] = await Promise.all([
+    db.query<import('mysql2').RowDataPacket[]>(`SELECT COUNT(*) total FROM users u LEFT JOIN profiles p ON p.id=u.id WHERE ${where}`, params),
+    db.query<import('mysql2').RowDataPacket[]>(`SELECT u.id,u.email,u.phone,u.role,u.status,u.created_at,p.username,p.gender,p.city,p.commune,p.is_admin,${activeSubscription} has_active_subscription FROM users u LEFT JOIN profiles p ON p.id=u.id WHERE ${where} ORDER BY FIELD(u.role,'super_admin','admin','user'),u.created_at DESC LIMIT ? OFFSET ?`, [...params, limit, page * limit]),
+  ])
+  response.json({ data: rows, total: Number(count[0].total), page, limit })
 })
 
 app.patch('/v1/admin/users/:userId/status', requireAdmin, async (request, response) => {
@@ -267,6 +284,40 @@ app.patch('/v1/admin/users/:userId/password', requireAdmin, async (request, resp
   if (!result.affectedRows) return response.status(404).json({ error: 'user_not_found' })
   await db.execute('INSERT INTO audit_events (id,actor_id,target_user_id,action,entity_type,entity_id,reason,metadata,created_at) VALUES (?,?,?,?,?,?,?,\'{}\',CURRENT_TIMESTAMP(3))', [crypto.randomUUID(), actorId, request.params.userId, 'password_reset', 'user', request.params.userId, 'Réinitialisation administrateur'])
   response.json({ ok: true })
+})
+
+app.post('/v1/admin/users/bulk-password-reset', requireSuperAdmin, async (request, response) => {
+  const parsed = z.object({
+    password: z.string().min(10).max(200), confirmation: z.literal('REINITIALISER'),
+    filters: z.object({
+      q: z.string().max(160).optional(), gender: z.string().max(16).optional(),
+      status: z.enum(['active', 'suspended', 'banned', 'deleted']).optional(),
+      role: z.enum(['user', 'admin', 'super_admin']).optional(), city: z.string().max(120).optional(),
+      subscription: z.enum(['active', 'inactive']).optional(), includePrivileged: z.boolean().default(false),
+    }),
+  }).safeParse(request.body)
+  if (!parsed.success) return response.status(400).json({ error: 'invalid_bulk_password_reset' })
+  const { filters } = parsed.data
+  const clauses = ['1=1']
+  const params: unknown[] = []
+  if (!filters.includePrivileged) clauses.push("u.role='user'")
+  if (filters.q) { clauses.push('(u.email LIKE ? OR u.phone LIKE ? OR p.username LIKE ?)'); params.push(`%${filters.q}%`, `%${filters.q}%`, `%${filters.q}%`) }
+  for (const [value, column] of [[filters.gender, 'p.gender'], [filters.status, 'u.status'], [filters.role, 'u.role'], [filters.city, 'p.city']] as const) {
+    if (value) { clauses.push(`${column}=?`); params.push(value) }
+  }
+  const activeSubscription = `EXISTS(SELECT 1 FROM user_subscriptions s WHERE s.user_id=u.id AND s.status='active' AND (s.ends_at IS NULL OR s.ends_at>CURRENT_TIMESTAMP(3)))`
+  if (filters.subscription === 'active') clauses.push(activeSubscription)
+  if (filters.subscription === 'inactive') clauses.push(`NOT ${activeSubscription}`)
+  const where = clauses.join(' AND ')
+  const [targets] = await db.query<import('mysql2').RowDataPacket[]>(`SELECT u.id FROM users u LEFT JOIN profiles p ON p.id=u.id WHERE ${where}`, params)
+  if (!targets.length) return response.json({ ok: true, affected: 0 })
+  const hash = await bcrypt.hash(parsed.data.password, 12)
+  const ids = targets.map((row) => String(row.id))
+  const placeholders = ids.map(() => '?').join(',')
+  await db.execute(`UPDATE users SET password_hash=?,updated_at=CURRENT_TIMESTAMP(3) WHERE id IN (${placeholders})`, [hash, ...ids])
+  const actorId = (request as AuthedRequest).user!.id
+  await db.execute('INSERT INTO audit_events (id,actor_id,action,entity_type,reason,metadata,created_at) VALUES (?,?,?,?,?,?,CURRENT_TIMESTAMP(3))', [crypto.randomUUID(), actorId, 'bulk_password_reset', 'users', `Réinitialisation de ${ids.length} compte(s)`, JSON.stringify({ filters, affected: ids.length })])
+  response.json({ ok: true, affected: ids.length })
 })
 
 app.get('/v1/notifications/counts', requireAuth, async (request, response) => {
